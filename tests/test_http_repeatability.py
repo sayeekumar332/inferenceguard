@@ -5,6 +5,9 @@ import threading
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+import pytest
+
+from inferenceguard.cli import main
 from inferenceguard.http_client import HttpInferenceClient
 from inferenceguard.repeatability import run_repeatability
 
@@ -113,3 +116,65 @@ def test_http_server_failure_is_inconclusive():
     assert result.error == "Request 2: InferenceTransportError"
     assert len(requests) == 2
     assert requests[0] == requests[1]
+
+
+@pytest.mark.parametrize(
+    ("outputs", "verdict", "exit_code", "completed", "mismatches", "attempts"),
+    [
+        (["A", "A", "A"], "PASS", 0, 3, [], 3),
+        (["A", "B", "B"], "FAIL", 1, 3, [1, 2], 3),
+        (["A", None, "A"], "INCONCLUSIVE", 2, 1, [], 2),
+    ],
+)
+def test_repeat_cli_end_to_end(
+    tmp_path, outputs, verdict, exit_code, completed, mismatches, attempts
+):
+    """Verify CLI -> HTTP -> repeatability -> JSON report."""
+    report_path = tmp_path / "repeatability.json"
+
+    with mock_inference_server(outputs) as (endpoint, state):
+        result_code = main(
+            [
+                "repeat",
+                "--endpoint",
+                endpoint,
+                "--model",
+                "mock-model",
+                "--prompt",
+                "Explain RISC-V in one sentence.",
+                "--repeats",
+                "3",
+                "--max-tokens",
+                "32",
+                "--timeout-seconds",
+                "5",
+                "--output",
+                str(report_path),
+            ]
+        )
+
+    assert result_code == exit_code
+    assert report_path.is_file()
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert report["verdict"] == verdict
+    assert report["requested"] == 3
+    assert report["completed"] == completed
+    assert report["mismatch_indices"] == mismatches
+
+    requests = state["requests"]
+    assert len(requests) == attempts
+    assert all(request == requests[0] for request in requests)
+
+    assert requests[0]["model"] == "mock-model"
+    assert requests[0]["prompt"] == "Explain RISC-V in one sentence."
+    assert requests[0]["max_tokens"] == 32
+    assert requests[0]["temperature"] == 0
+    assert requests[0]["stream"] is False
+
+    if verdict == "FAIL":
+        assert [item["text"] for item in report["observations"]] == ["A", "B", "B"]
+
+    if verdict == "INCONCLUSIVE":
+        assert report["error"] == "Request 2: InferenceTransportError"
