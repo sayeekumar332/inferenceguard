@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "metadata": {
+    "model_id": "fixture-model",
+    "model_revision": "abc123",
+    "tokenizer_id": "fixture-tokenizer",
+    "tokenizer_revision": "abc123",
+    "sampling": {
+      "temperature": 0,
+      "seed": 42,
+      "max_tokens": 3
+    }
+  },
+  "cases": [
+    {
+      "id": "shared-prefix-001",
+      "prompt_hash": "sha256:fixture",
+      "tokens": [
+        10,
+        20,
+        31
+      ],
+      "logprobs": [
+        -0.1,
+        -0.2,
+        -0.3
+      ]
+    }
+  ]
+}
