@@ -26,6 +26,12 @@ def main(argv: list[str] | None = None) -> int:
     repeat.add_argument("--model", required=True)
     repeat.add_argument("--prompt", required=True)
     repeat.add_argument("--repeats", type=int, default=3)
+    repeat.add_argument(
+        "--comparison-mode",
+        choices=("text", "tokens"),
+        default="text",
+        help="Compare generated text or genuine token IDs",
+    )
     repeat.add_argument("--max-tokens", type=int, default=32)
     repeat.add_argument("--timeout-seconds", type=float, default=30.0)
     repeat.add_argument("--output", required=True, type=Path)
@@ -48,8 +54,15 @@ def main(argv: list[str] | None = None) -> int:
                 prompt=args.prompt,
                 repeats=args.repeats,
                 max_tokens=args.max_tokens,
+                comparison_mode=args.comparison_mode,
             )
             report = asdict(result)
+
+            # Preserve the existing text-only JSON observation format.
+            # Include token_ids only when genuine token IDs are available.
+            for observation in report["observations"]:
+                if observation["token_ids"] is None:
+                    observation.pop("token_ids")
 
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(
