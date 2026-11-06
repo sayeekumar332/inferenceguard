@@ -1,0 +1,16 @@
+{
+  "same_prompt": true,
+  "cache_off_repeatable": true,
+  "cache_on_repeatable": true,
+  "cross_configuration_identical": true,
+  "cache_off_hits": [
+    0,
+    0,
+    0
+  ],
+  "cache_on_hits": [
+    0,
+    368,
+    368
+  ]
+}
