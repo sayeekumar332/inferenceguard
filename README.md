@@ -42,3 +42,28 @@ The checker validates schema, alignment of case IDs and prompt fingerprints, mod
 5. Signed/provenanced evidence and enterprise integrations after market validation.
 
 MIT license. This is not an attestation or safety certification product.
+
+### Token-ID repeatability comparison
+
+InferenceGuard supports two comparison modes for repeated inference requests:
+
+- `text` (default): compares decoded completion text and preserves existing behavior.
+- `tokens`: compares generated token-ID sequences and detects differences even when decoded text is identical.
+
+Example:
+
+```bash
+inferenceguard repeat \
+  --endpoint http://127.0.0.1:8000/v1/completions \
+  --model example-model \
+  --prompt "Hello" \
+  --repeats 3 \
+  --comparison-mode tokens \
+  --output token_report.json
+```
+
+**Important limitation:** The current HTTP client does not extract generated token IDs from standard OpenAI-compatible completion responses. Consequently, token comparison through this HTTP adapter returns `INCONCLUSIVE` when token IDs are unavailable.
+
+Token comparison logic has been verified using synthetic token-capable clients. Separately, InferenceGuard's offline `compare` command supports token-ID comparison using recorded observations.
+
+The NVIDIA Tesla T4 experiment under `experiments/t4_qwen3_0_6b/` provides real-GPU token-ID observations, but those observations were collected using vLLM's Python API, not this HTTP repeat command.

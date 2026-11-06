@@ -37,17 +37,21 @@ def run_repeatability(
     prompt: str,
     repeats: int = 3,
     max_tokens: int = 32,
+    comparison_mode: Literal["text", "tokens"] = "text",
 ) -> RepeatabilityResult:
-    """Compare generated text from repeated identical requests.
+    """Compare repeated requests using text or generated token IDs.
 
-    Request indices are zero-based. The first successful response
-    is the baseline. A request failure makes the experiment
-    inconclusive even if an earlier output mismatch was observed.
+    The first successful response is the baseline.
+    Missing token IDs make token comparison inconclusive.
+    Request failures preserve the existing inconclusive behavior.
     """
     if isinstance(repeats, bool) or not isinstance(repeats, int):
         raise ValueError("repeats must be an integer")
     if not 2 <= repeats <= 1000:
         raise ValueError("repeats must be between 2 and 1000")
+
+    if comparison_mode not in ("text", "tokens"):
+        raise ValueError("comparison_mode must be 'text' or 'tokens'")
 
     observations: list[InferenceObservation] = []
     mismatches: list[int] = []
@@ -69,10 +73,38 @@ def run_repeatability(
                 error=f"Request {index + 1}: {type(exc).__name__}",
             )
 
-        if observations and observation.text != observations[0].text:
-            mismatches.append(index)
+        if observations:
+            baseline = observations[0]
+
+            if comparison_mode == "text":
+                if observation.text != baseline.text:
+                    mismatches.append(index)
+
+            elif (
+                baseline.token_ids is not None
+                and observation.token_ids is not None
+                and observation.token_ids != baseline.token_ids
+            ):
+                mismatches.append(index)
 
         observations.append(observation)
+
+    if comparison_mode == "tokens":
+        missing = [
+            index + 1
+            for index, observation in enumerate(observations)
+            if observation.token_ids is None
+        ]
+
+        if missing:
+            return RepeatabilityResult(
+                verdict="INCONCLUSIVE",
+                requested=repeats,
+                completed=len(observations),
+                observations=tuple(observations),
+                mismatch_indices=tuple(mismatches),
+                error=f"Token IDs unavailable for requests: {missing}",
+            )
 
     return RepeatabilityResult(
         verdict="FAIL" if mismatches else "PASS",

@@ -22,6 +22,7 @@ class InferenceResponseError(Exception):
 class InferenceObservation:
     text: str
     finish_reason: str | None
+    token_ids: tuple[int, ...] | None = None
 
 
 class HttpInferenceClient:
