@@ -1,0 +1,10 @@
+{
+  "gpu": "Tesla T4",
+  "model": "Qwen/Qwen3-0.6B",
+  "vllm_version": "0.33.0",
+  "precision": "float16",
+  "temperature": 0,
+  "repeats": 3,
+  "comparison_mode": "tokens",
+  "prefix_caching": "enabled"
+}
