@@ -13,7 +13,7 @@ from inferenceguard.prefix_cache_metrics import (
 
 
 @contextmanager
-def mock_metrics_server(body, status=200):
+def mock_metrics_server(body, status=200, redirect_location=None):
     """Run a local mock Prometheus endpoint."""
 
     class Handler(BaseHTTPRequestHandler):
@@ -25,6 +25,8 @@ def mock_metrics_server(body, status=200):
             payload = body.encode("utf-8")
 
             self.send_response(status)
+            if redirect_location is not None:
+                self.send_header("Location", redirect_location)
             self.send_header(
                 "Content-Type",
                 "text/plain; charset=utf-8",
@@ -95,7 +97,7 @@ def test_reject_http_server_error():
 
 def test_reject_connection_error():
     with patch(
-        "inferenceguard.prefix_cache_metrics.urllib.request.urlopen",
+        "inferenceguard.prefix_cache_metrics.urllib.request.OpenerDirector.open",
         side_effect=OSError("Connection refused"),
     ):
         with pytest.raises(RuntimeError):
@@ -112,3 +114,36 @@ def test_reject_http_timeout():
                 "http://127.0.0.1:8000",
                 timeout=0.1,
             )
+
+
+def test_reject_redirect_response():
+    """Redirects must not be followed to another destination."""
+    with mock_metrics_server("", status=302) as url:
+        with pytest.raises(RuntimeError):
+            fetch_prefix_cache_metrics(url)
+
+
+def test_reject_oversized_metrics_response():
+    """A metrics response exceeding the limit must be rejected."""
+    oversized_metrics = VALID_METRICS + "\n" + ("# padding\n" * 200000)
+
+    with mock_metrics_server(oversized_metrics) as url:
+        with pytest.raises(ValueError, match="size"):
+            fetch_prefix_cache_metrics(url)
+
+
+def test_reject_non_http_url():
+    with pytest.raises(ValueError):
+        fetch_prefix_cache_metrics("file:///etc/passwd")
+
+
+def test_reject_redirect_with_valid_destination():
+    """Never follow a redirect, even to a working metrics server."""
+    with mock_metrics_server(VALID_METRICS) as destination:
+        with mock_metrics_server(
+            "",
+            status=302,
+            redirect_location=f"{destination}/metrics",
+        ) as source:
+            with pytest.raises(RuntimeError):
+                fetch_prefix_cache_metrics(source)

@@ -101,15 +101,25 @@ def calculate_cache_delta(
     }
 
 
+MAX_METRICS_RESPONSE_BYTES = 1024 * 1024  # 1 MiB
+
+
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    """Prevent the metrics client from following HTTP redirects."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def fetch_prefix_cache_metrics(
     base_url: str,
     timeout: float = 5.0,
 ) -> dict[str, int]:
-    """Retrieve and parse prefix-cache counters from vLLM /metrics.
+    """Retrieve and validate prefix-cache metrics from a vLLM server.
 
-    The target must be an HTTP(S) server address.
-    Transport failures raise RuntimeError.
-    Invalid metrics raise ValueError.
+    Only HTTP(S) base URLs are accepted.
+    Redirects are rejected.
+    Responses are limited to 1 MiB.
     """
     if not isinstance(base_url, str) or not base_url.strip():
         raise ValueError("Invalid metrics server URL")
@@ -136,20 +146,23 @@ def fetch_prefix_cache_metrics(
 
     endpoint = base_url.rstrip("/") + "/metrics"
 
+    # Use a dedicated opener; do not change global urllib settings.
+    opener = urllib.request.build_opener(_RejectRedirects())
+
     try:
-        # This endpoint is supplied explicitly by the caller.
-        # noqa: S310
-        # URL validation above restricts the scheme to HTTP(S).
-        with urllib.request.urlopen(  # noqa: S310
+        with opener.open(  # noqa: S310
             endpoint, timeout=timeout
         ) as response:
-            payload = response.read()
-
-        metrics_text = payload.decode("utf-8")
+            payload = response.read(MAX_METRICS_RESPONSE_BYTES + 1)
 
     except (urllib.error.URLError, OSError, TimeoutError) as exc:
         raise RuntimeError(f"Unable to retrieve prefix-cache metrics: {exc}") from exc
 
+    if len(payload) > MAX_METRICS_RESPONSE_BYTES:
+        raise ValueError("Prefix-cache metrics response exceeds maximum size")
+
+    try:
+        metrics_text = payload.decode("utf-8")
     except UnicodeError as exc:
         raise ValueError("Metrics response is not UTF-8") from exc
 
