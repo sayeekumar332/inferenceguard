@@ -47,6 +47,7 @@ def main(argv: list[str] | None = None) -> int:
             client = HttpInferenceClient(
                 endpoint=args.endpoint,
                 timeout_seconds=args.timeout_seconds,
+                include_token_ids=(args.comparison_mode == "tokens"),
             )
             result = run_repeatability(
                 client,

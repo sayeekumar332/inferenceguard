@@ -30,7 +30,13 @@ class HttpInferenceClient:
 
     MAX_RESPONSE_BYTES = 1024 * 1024
 
-    def __init__(self, endpoint: str, timeout_seconds: float = 30.0) -> None:
+    def __init__(
+        self,
+        endpoint: str,
+        timeout_seconds: float = 30.0,
+        *,
+        include_token_ids: bool = False,
+    ) -> None:
         if not isinstance(endpoint, str):
             raise ValueError("endpoint must be a URL string")
 
@@ -64,6 +70,10 @@ class HttpInferenceClient:
 
         self.endpoint = endpoint
         self.timeout_seconds = float(timeout_seconds)
+        if not isinstance(include_token_ids, bool):
+            raise ValueError("include_token_ids must be a boolean")
+
+        self.include_token_ids = include_token_ids
 
     def generate(
         self,
@@ -78,15 +88,18 @@ class HttpInferenceClient:
         if isinstance(max_tokens, bool) or not isinstance(max_tokens, int) or max_tokens <= 0:
             raise ValueError("max_tokens must be a positive integer")
 
-        payload = json.dumps(
-            {
-                "model": model,
-                "prompt": prompt,
-                "temperature": 0,
-                "max_tokens": max_tokens,
-                "stream": False,
-            }
-        ).encode("utf-8")
+        request_payload = {
+            "model": model,
+            "prompt": prompt,
+            "temperature": 0,
+            "max_tokens": max_tokens,
+            "stream": False,
+        }
+
+        if self.include_token_ids:
+            request_payload["return_token_ids"] = True
+
+        payload = json.dumps(request_payload).encode("utf-8")
 
         # Only HTTP(S) endpoints with the expected path are accepted by __init__.
         request = urllib.request.Request(  # noqa: S310
@@ -134,4 +147,25 @@ class HttpInferenceClient:
         if reason is not None and not isinstance(reason, str):
             raise InferenceResponseError("Invalid finish_reason")
 
-        return InferenceObservation(text=text, finish_reason=reason)
+        token_ids = None
+
+        if self.include_token_ids:
+            raw_token_ids = choice.get("token_ids")
+
+            if raw_token_ids is not None:
+                if not isinstance(raw_token_ids, list):
+                    raise InferenceResponseError("token_ids must be a list")
+
+                if any(
+                    isinstance(token_id, bool) or not isinstance(token_id, int) or token_id < 0
+                    for token_id in raw_token_ids
+                ):
+                    raise InferenceResponseError("token_ids must contain non-negative integers")
+
+                token_ids = tuple(raw_token_ids)
+
+        return InferenceObservation(
+            text=text,
+            finish_reason=reason,
+            token_ids=token_ids,
+        )
