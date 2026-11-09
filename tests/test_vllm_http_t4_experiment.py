@@ -90,3 +90,37 @@ def test_incomplete_requests_rejected():
 
     with pytest.raises(RuntimeError):
         validate_report(report, exit_code=0)
+
+
+def test_preserved_real_t4_http_evidence():
+    """Verify the recorded real-vLLM HTTP experiment without a GPU."""
+    import json
+    from pathlib import Path
+
+    evidence_dir = Path(__file__).resolve().parents[1] / "experiments" / "vllm_http_t4" / "evidence"
+
+    environment = json.loads((evidence_dir / "environment.json").read_text(encoding="utf-8"))
+    report = json.loads((evidence_dir / "repeatability.json").read_text(encoding="utf-8"))
+    summary = json.loads((evidence_dir / "execution_summary.json").read_text(encoding="utf-8"))
+
+    assert environment["gpu"] == "Tesla T4"
+    assert environment["model"] == "Qwen/Qwen3-0.6B"
+    assert environment["vllm_version"] == "0.33.0"
+    assert environment["precision"] == "float16"
+    assert environment["comparison_mode"] == "tokens"
+
+    assert summary["runner_exit_code"] == 0
+    assert summary["execution_error"] is None
+
+    assert report["verdict"] == "PASS"
+    assert report["requested"] == 3
+    assert report["completed"] == 3
+
+    # Independently validate all recorded token sequences.
+    validate_report(report, exit_code=0)
+
+    sequences = [observation["token_ids"] for observation in report["observations"]]
+
+    assert len(sequences) == 3
+    assert all(len(tokens) == 24 for tokens in sequences)
+    assert sequences[0] == sequences[1] == sequences[2]
