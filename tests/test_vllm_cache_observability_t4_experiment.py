@@ -1,0 +1,213 @@
+"""CPU-only validation of planned real-vLLM cache evidence."""
+
+from copy import deepcopy
+
+import pytest
+
+from experiments.vllm_cache_observability_t4.run_experiment import (
+    validate_cache_report,
+)
+
+
+def make_report():
+    return {
+        "verdict": "PASS",
+        "requested": 3,
+        "completed": 3,
+        "observations": [
+            {
+                "text": "same output",
+                "finish_reason": "length",
+                "token_ids": [10, 20, 30],
+            }
+            for _ in range(3)
+        ],
+        "mismatch_indices": [],
+        "error": None,
+        "cache_observability": {
+            "status": "AVAILABLE",
+            "initial_error": None,
+            "deltas": [
+                {"queries": 256, "hits": 0, "hit_rate": 0.0},
+                {"queries": 256, "hits": 224, "hit_rate": 0.875},
+                {"queries": 256, "hits": 224, "hit_rate": 0.875},
+            ],
+            "errors": [None, None, None],
+        },
+    }
+
+
+def test_valid_combined_evidence_accepted():
+    validate_cache_report(make_report(), exit_code=0)
+
+
+def test_missing_cache_observability_rejected():
+    report = make_report()
+    del report["cache_observability"]
+
+    with pytest.raises(RuntimeError):
+        validate_cache_report(report, exit_code=0)
+
+
+def test_unavailable_cache_metrics_rejected():
+    report = make_report()
+    report["cache_observability"]["status"] = "UNAVAILABLE"
+    report["cache_observability"]["deltas"] = [None, None, None]
+
+    with pytest.raises(RuntimeError):
+        validate_cache_report(report, exit_code=0)
+
+
+def test_token_divergence_rejected():
+    report = deepcopy(make_report())
+    report["observations"][1]["token_ids"] = [10, 99, 30]
+
+    with pytest.raises(RuntimeError):
+        validate_cache_report(report, exit_code=0)
+
+
+def test_no_measured_cache_hits_rejected():
+    report = make_report()
+    report["cache_observability"]["deltas"] = [
+        {"queries": 256, "hits": 0, "hit_rate": 0.0} for _ in range(3)
+    ]
+
+    with pytest.raises(RuntimeError):
+        validate_cache_report(report, exit_code=0)
+
+
+def test_incorrect_cache_hit_rate_rejected():
+    report = make_report()
+    report["cache_observability"]["deltas"][1]["hit_rate"] = 0.5
+
+    with pytest.raises(RuntimeError, match="hit rate"):
+        validate_cache_report(report, exit_code=0)
+
+
+@pytest.mark.parametrize("invalid_counter", [-1, True, 2.5, None])
+def test_invalid_cache_counter_rejected(invalid_counter):
+    report = make_report()
+    report["cache_observability"]["deltas"][1]["hits"] = invalid_counter
+
+    with pytest.raises(RuntimeError):
+        validate_cache_report(report, exit_code=0)
+
+
+def test_first_request_cache_hits_do_not_prove_reuse():
+    report = make_report()
+
+    report["cache_observability"]["deltas"] = [
+        {"queries": 256, "hits": 128, "hit_rate": 0.5},
+        {"queries": 256, "hits": 0, "hit_rate": 0.0},
+        {"queries": 256, "hits": 0, "hit_rate": 0.0},
+    ]
+
+    with pytest.raises(RuntimeError, match="repeated requests"):
+        validate_cache_report(report, exit_code=0)
+
+
+def test_vllm_server_command_preserves_t4_configuration():
+    from experiments.vllm_cache_observability_t4.run_experiment import (
+        build_server_command,
+    )
+
+    command = build_server_command("/usr/bin/vllm")
+
+    assert command == [
+        "/usr/bin/vllm",
+        "serve",
+        "Qwen/Qwen3-0.6B",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000",
+        "--dtype",
+        "float16",
+        "--max-model-len",
+        "2048",
+        "--gpu-memory-utilization",
+        "0.75",
+        "--enable-prefix-caching",
+    ]
+
+
+def test_inferenceguard_command_enables_cache_observability():
+    from experiments.vllm_cache_observability_t4.run_experiment import (
+        build_inferenceguard_command,
+    )
+
+    command = build_inferenceguard_command(
+        python_executable="/usr/bin/python3",
+        output_path="evidence/repeatability.json",
+    )
+
+    assert command[:4] == [
+        "/usr/bin/python3",
+        "-m",
+        "inferenceguard.cli",
+        "repeat",
+    ]
+    assert "--observe-prefix-cache" in command
+    assert command[command.index("--comparison-mode") + 1] == "tokens"
+    assert command[command.index("--repeats") + 1] == "3"
+    assert command[command.index("--max-tokens") + 1] == "24"
+
+
+def test_inferenceguard_command_preserves_output_destination():
+    from experiments.vllm_cache_observability_t4.run_experiment import (
+        build_inferenceguard_command,
+    )
+
+    command = build_inferenceguard_command(
+        python_executable="/usr/bin/python3",
+        output_path="evidence/custom-report.json",
+    )
+
+    assert command[command.index("--output") + 1] == ("evidence/custom-report.json")
+    assert command[command.index("--endpoint") + 1] == ("http://127.0.0.1:8000/v1/completions")
+
+
+def test_metrics_preflight_accepts_valid_counters(monkeypatch):
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    monkeypatch.setattr(
+        run_experiment,
+        "fetch_prefix_cache_metrics",
+        lambda base_url: {"queries": 100, "hits": 40},
+        raising=False,
+    )
+
+    snapshot = run_experiment.check_metrics_preflight("http://127.0.0.1:8000")
+
+    assert snapshot == {"queries": 100, "hits": 40}
+
+
+def test_metrics_preflight_rejects_invalid_counters(monkeypatch):
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    monkeypatch.setattr(
+        run_experiment,
+        "fetch_prefix_cache_metrics",
+        lambda base_url: {"queries": 20, "hits": 30},
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="Metrics preflight failed"):
+        run_experiment.check_metrics_preflight("http://127.0.0.1:8000")
+
+
+def test_metrics_preflight_rejects_unavailable_endpoint(monkeypatch):
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    def unavailable(base_url):
+        raise RuntimeError("Metrics endpoint unavailable")
+
+    monkeypatch.setattr(
+        run_experiment,
+        "fetch_prefix_cache_metrics",
+        unavailable,
+        raising=False,
+    )
+
+    with pytest.raises(RuntimeError, match="Metrics"):
+        run_experiment.check_metrics_preflight("http://127.0.0.1:8000")
