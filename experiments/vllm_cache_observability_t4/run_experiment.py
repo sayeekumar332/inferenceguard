@@ -7,6 +7,10 @@ GPU experiment execution will be added in a later milestone.
 import math
 
 from experiments.vllm_http_t4.run_experiment import validate_report
+from inferenceguard.prefix_cache_metrics import (
+    calculate_cache_delta,
+    fetch_prefix_cache_metrics,
+)
 
 
 def validate_cache_report(report, exit_code):
@@ -107,3 +111,84 @@ def validate_cache_report(report, exit_code):
         "total_hits": total_hits,
         "repeated_hits": repeated_hits,
     }
+
+
+def build_server_command(vllm_executable: str) -> list[str]:
+    """Construct the validated Tesla T4 vLLM server command."""
+    if not isinstance(vllm_executable, str) or not vllm_executable.strip():
+        raise ValueError("A valid vLLM executable is required")
+
+    return [
+        vllm_executable,
+        "serve",
+        "Qwen/Qwen3-0.6B",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8000",
+        "--dtype",
+        "float16",
+        "--max-model-len",
+        "2048",
+        "--gpu-memory-utilization",
+        "0.75",
+        "--enable-prefix-caching",
+    ]
+
+
+def build_inferenceguard_command(
+    python_executable: str,
+    output_path: str,
+) -> list[str]:
+    """Construct the token-verification and cache-observation command."""
+    if not isinstance(python_executable, str) or not python_executable.strip():
+        raise ValueError("A valid Python executable is required")
+
+    if not isinstance(output_path, str) or not output_path.strip():
+        raise ValueError("A valid evidence output path is required")
+
+    return [
+        python_executable,
+        "-m",
+        "inferenceguard.cli",
+        "repeat",
+        "--endpoint",
+        "http://127.0.0.1:8000/v1/completions",
+        "--model",
+        "Qwen/Qwen3-0.6B",
+        "--prompt",
+        "Explain why deterministic inference verification is important.",
+        "--repeats",
+        "3",
+        "--comparison-mode",
+        "tokens",
+        "--max-tokens",
+        "24",
+        "--observe-prefix-cache",
+        "--output",
+        output_path,
+    ]
+
+
+def check_metrics_preflight(base_url: str) -> dict[str, int]:
+    """Verify that vLLM provides valid prefix-cache metrics.
+
+    Execute this check after the inference server becomes healthy,
+    but before running the repeated inference experiment.
+    """
+
+    try:
+        snapshot = fetch_prefix_cache_metrics(base_url)
+
+        # Validate individual counters and their relationship
+        # using the existing, tested cache-delta implementation.
+        calculate_cache_delta(snapshot, snapshot)
+
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise RuntimeError(f"Metrics preflight failed: {exc}") from exc
+
+    print("Metrics preflight: PASS")
+    print("Prefix-cache query tokens:", snapshot["queries"])
+    print("Prefix-cache hit tokens:", snapshot["hits"])
+
+    return snapshot
