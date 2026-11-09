@@ -65,6 +65,21 @@ def test_valid_completion():
         assert result.finish_reason == "stop"
 
 
+def test_vllm_token_ids_acquired():
+    response = completion("Output A")
+    response["choices"][0]["token_ids"] = [101, 202, 303]
+
+    with mock_endpoint(response) as endpoint:
+        client = HttpInferenceClient(
+            endpoint,
+            include_token_ids=True,
+        )
+        result = client.generate("test-model", "Hello")
+
+    assert result.text == "Output A"
+    assert result.token_ids == (101, 202, 303)
+
+
 def test_missing_choices_rejected():
     with mock_endpoint({"id": "invalid"}) as endpoint:
         with pytest.raises(InferenceResponseError):
@@ -94,3 +109,65 @@ def test_invalid_timeout_rejected():
             "http://127.0.0.1:8000/v1/completions",
             timeout_seconds=-1,
         )
+
+
+def test_vllm_token_request_flag_sent(monkeypatch):
+    import urllib.request
+    from io import BytesIO
+
+    captured = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            return False
+
+        def read(self, size=-1):
+            return BytesIO(json.dumps(completion()).encode("utf-8")).read(size)
+
+    def fake_urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data)
+        return FakeResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    endpoint = "http://127.0.0.1:8000/v1/completions"
+
+    HttpInferenceClient(
+        endpoint,
+        include_token_ids=True,
+    ).generate("test-model", "Hello")
+
+    assert captured["payload"]["return_token_ids"] is True
+
+    HttpInferenceClient(endpoint).generate("test-model", "Hello")
+
+    assert "return_token_ids" not in captured["payload"]
+
+
+@pytest.mark.parametrize(
+    "invalid_token_ids",
+    [
+        "101,202,303",
+        123,
+        {"tokens": [101, 202]},
+        [101, "202", 303],
+        [101, True, 303],
+        [101, -1, 303],
+        [101, 2.5, 303],
+    ],
+)
+def test_vllm_malformed_token_ids_rejected(invalid_token_ids):
+    response = completion("Output A")
+    response["choices"][0]["token_ids"] = invalid_token_ids
+
+    with mock_endpoint(response) as endpoint:
+        client = HttpInferenceClient(
+            endpoint,
+            include_token_ids=True,
+        )
+
+        with pytest.raises(InferenceResponseError):
+            client.generate("test-model", "Hello")
