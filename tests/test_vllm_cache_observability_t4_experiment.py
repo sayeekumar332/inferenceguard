@@ -532,3 +532,53 @@ def test_controlled_experiment_stops_on_inference_failure(monkeypatch, tmp_path)
         run_experiment.run_controlled_experiment("/usr/bin/vllm", "/usr/bin/python3", tmp_path)
 
     assert calls == ["start", "preflight", "inference", "stop"]
+
+
+def test_environment_metadata_records_gpu_and_vllm_version(monkeypatch):
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    monkeypatch.setattr(
+        run_experiment,
+        "gpu_name",
+        lambda: "NVIDIA Tesla T4",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        run_experiment,
+        "version",
+        lambda package: "0.33.0",
+        raising=False,
+    )
+
+    metadata = run_experiment.collect_environment_metadata()
+
+    assert metadata["gpu"] == "NVIDIA Tesla T4"
+    assert metadata["vllm_version"] == "0.33.0"
+    assert metadata["model"] == "Qwen/Qwen3-0.6B"
+    assert metadata["precision"] == "float16"
+    assert metadata["prefix_caching"] == "enabled"
+
+
+def test_environment_metadata_records_experiment_configuration(monkeypatch):
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    monkeypatch.setattr(
+        run_experiment,
+        "gpu_name",
+        lambda: "NVIDIA Tesla T4",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        run_experiment,
+        "version",
+        lambda package: "0.33.0",
+        raising=False,
+    )
+
+    metadata = run_experiment.collect_environment_metadata()
+
+    assert metadata["temperature"] == 0
+    assert metadata["repeats"] == 3
+    assert metadata["comparison_mode"] == "tokens"
+    assert metadata["max_tokens"] == 24
+    assert "--enable-prefix-caching" in metadata["server_command"]

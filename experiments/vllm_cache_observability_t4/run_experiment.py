@@ -7,10 +7,13 @@ GPU experiment execution will be added in a later milestone.
 import json
 import math
 import subprocess
+import sys
 from contextlib import contextmanager
+from importlib.metadata import version
 from pathlib import Path
 
 from experiments.vllm_http_t4.run_experiment import (
+    gpu_name,
     validate_report,
     wait_for_server,
 )
@@ -288,3 +291,22 @@ def run_controlled_experiment(
 
     # The context manager has already shut down the server here.
     return result
+
+
+def collect_environment_metadata() -> dict:
+    """Collect reproducible GPU experiment environment metadata."""
+    server_command = build_server_command("vllm")
+
+    return {
+        "gpu": gpu_name(),
+        "model": "Qwen/Qwen3-0.6B",
+        "vllm_version": version("vllm"),
+        "python_version": sys.version.split()[0],
+        "precision": "float16",
+        "temperature": 0,
+        "repeats": 3,
+        "comparison_mode": "tokens",
+        "max_tokens": 24,
+        "prefix_caching": "enabled",
+        "server_command": server_command,
+    }
