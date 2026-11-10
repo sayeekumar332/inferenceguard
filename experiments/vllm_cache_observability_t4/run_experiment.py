@@ -4,6 +4,7 @@ P4.1 implements offline evidence validation only.
 GPU experiment execution will be added in a later milestone.
 """
 
+import json
 import math
 import subprocess
 from contextlib import contextmanager
@@ -231,3 +232,32 @@ def prepare_server_for_inference(process):
     """Require server readiness and valid cache metrics before inference."""
     wait_for_server(process)
     return check_metrics_preflight("http://127.0.0.1:8000")
+
+
+def execute_inferenceguard(
+    python_executable: str,
+    report_path: Path,
+) -> dict:
+    """Execute InferenceGuard and independently validate its evidence."""
+    report_path = Path(report_path)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    command = build_inferenceguard_command(
+        python_executable,
+        str(report_path),
+    )
+
+    # Never allow an earlier report to masquerade as a new result.
+    report_path.unlink(missing_ok=True)
+
+    result = subprocess.run(command, check=False)  # noqa: S603
+
+    if not report_path.is_file():
+        raise RuntimeError("InferenceGuard report was not generated")
+
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Invalid InferenceGuard JSON report") from exc
+
+    return validate_cache_report(report, result.returncode)

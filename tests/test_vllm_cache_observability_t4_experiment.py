@@ -363,3 +363,65 @@ def test_server_preflight_rejects_unavailable_metrics(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Metrics preflight failed"):
         run_experiment.prepare_server_for_inference(MagicMock())
+
+
+def test_execute_inferenceguard_accepts_valid_evidence(monkeypatch, tmp_path):
+    import json
+    from subprocess import CompletedProcess
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    report_path = tmp_path / "repeatability.json"
+    report = make_report()
+
+    def fake_run(command, check):
+        assert check is False
+        assert "--observe-prefix-cache" in command
+        assert command[command.index("--output") + 1] == str(report_path)
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr(run_experiment.subprocess, "run", fake_run)
+
+    result = run_experiment.execute_inferenceguard("/usr/bin/python3", report_path)
+
+    assert result["verdict"] == "PASS"
+    assert result["cache_status"] == "AVAILABLE"
+    assert result["repeated_hits"] > 0
+
+
+def test_execute_inferenceguard_rejects_missing_report(monkeypatch, tmp_path):
+    from subprocess import CompletedProcess
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    report_path = tmp_path / "missing.json"
+
+    monkeypatch.setattr(
+        run_experiment.subprocess,
+        "run",
+        lambda command, check: CompletedProcess(command, 0),
+    )
+
+    with pytest.raises(RuntimeError, match="not generated"):
+        run_experiment.execute_inferenceguard("/usr/bin/python3", report_path)
+
+
+def test_execute_inferenceguard_rejects_invalid_evidence(monkeypatch, tmp_path):
+    import json
+    from subprocess import CompletedProcess
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    report_path = tmp_path / "repeatability.json"
+    report = make_report()
+    report["observations"][1]["token_ids"] = [10, 99, 30]
+
+    def fake_run(command, check):
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        return CompletedProcess(command, 0)
+
+    monkeypatch.setattr(run_experiment.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError):
+        run_experiment.execute_inferenceguard("/usr/bin/python3", report_path)
