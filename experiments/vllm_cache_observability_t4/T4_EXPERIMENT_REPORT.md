@@ -8,7 +8,7 @@ Evaluate InferenceGuard against a real vLLM inference server to verify:
 2. Observability of vLLM prefix-cache queries and hits.
 3. Consistency of recorded inference and cache evidence.
 
-This experiment evaluates one controlled configuration. It is not a comprehensive inference determinism certification.
+This experiment demonstrates the combined token-repeatability and prefix-cache measurement workflow on a real NVIDIA Tesla T4 inference server.
 
 ## 2. Experimental Environment
 
@@ -113,19 +113,11 @@ The publication includes:
 
 The raw `server.log` is retained separately and excluded from the public repository to avoid unnecessary exposure of environment-specific logs.
 
-## 9. Limitations
+## 9. Scope and future experiments
 
-This experiment:
+The recorded achievement is **three completed real-model inference calls with identical generated token IDs, together with directly observed cache-counter changes**. This result provides a baseline for expanding verification to additional hardware, models, concurrency patterns, and serving configurations.
 
-- Covers only one GPU architecture and one model.
-- Uses three deterministic requests in a single controlled run.
-- Does not evaluate high-concurrency or distributed inference.
-- Does not measure latency improvements or financial savings.
-- Does not test nondeterministic sampling configurations.
-- Does not establish determinism across driver versions, GPU architectures, or vLLM releases.
-- Does not reproduce or resolve the upstream vLLM prefix-cache determinism issue.
-
-Related upstream issue: https://github.com/vllm-project/vllm/issues/40896
+The current run used one Tesla T4, one model, temperature zero, and three sequential requests. It did not measure latency improvement or cost savings, test stochastic decoding or distributed workloads, or reproduce the separate H100-based [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896). A future matched-environment experiment would be required to investigate that upstream report. The recorded 66.31% figure is a token-counter hit ratio, not a performance improvement.
 
 ## 10. Reproduction
 

@@ -6,7 +6,7 @@
 
 InferenceGuard is an open-source Python verification tool for detecting inference-output regressions, evaluating repeatability, and producing inspectable engineering evidence. It provides **offline reference-versus-candidate comparison**, **live HTTP completion checks**, **generated token-ID verification**, and **optional vLLM prefix-cache observability**.
 
-It is intended for inference engineers investigating changes across model versions, serving configurations, and cache behavior. Its verdicts assess specified observable invariants—not the semantic quality of model answers.
+It helps inference engineers compare outputs across model versions and serving configurations, pinpoint divergent requests, and retain evidence they can review or use in CI. Its focus is repeatable, measurable verification of inference behavior.
 
 ## What is implemented
 
@@ -125,9 +125,9 @@ The experiment report describes setup, managed server lifecycle, source evidence
 
 **Earlier case study:** [Tesla T4 cache-enabled and cache-disabled comparison](experiments/t4_qwen3_0_6b/README.md) documents a distinct controlled experiment, including cache-on/cache-off output comparison. Do not conflate the measurements from these separate runs.
 
-### Relation to the upstream vLLM issue
+### Engineering relevance to vLLM regression investigations
 
-[vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896) describes first-request versus repeated-request differences in a different environment. InferenceGuard supplies checks relevant to detecting such divergence, including first-response baselines, token-ID comparison, and cache observation. **The T4 results did not reproduce or resolve the upstream issue**, which involved an NVIDIA H100 environment. The T4 result is evidence for the configuration tested, not a claim of determinism across hardware or vLLM releases.
+[vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896) illustrates why comparing the first response against later identical requests is valuable. InferenceGuard implements that comparison, detects token-ID differences, and records cache observations to support investigation. Our Tesla T4 experiments demonstrate these verification methods with actual inference and cache reuse under the recorded configurations. The upstream H100 issue is a motivating scenario rather than a failure we claim to have reproduced.
 
 ## Reproducible customer demonstrations (P5.2)
 
@@ -165,15 +165,11 @@ python -m pytest -q
 python -m build
 ```
 
-## Scope and limitations
+## Scope and next validation steps
 
-- Exact matching at temperature zero is useful evidence but does not guarantee universal determinism.
-- Token-level verification depends on a compatible backend returning genuine generated token IDs.
-- Missing prefix-cache metrics are reported separately and cannot be treated as measured zero reuse.
-- Cache-hit ratios alone do not establish speedups or economic savings.
-- Real-GPU findings cover the reported hardware, model, software, and three-request workload only.
-- High-concurrency, distributed-serving, and cross-GPU determinism have not been established by these demonstrations.
-- InferenceGuard detects and reports observations; it does not modify vLLM's caching algorithms or kernels.
+InferenceGuard is an **independent verification layer** for inference outputs and cache observations. It is not a patch to vLLM internals. The current evidence demonstrates the implemented checks and real-server integration under the documented Tesla T4 configurations.
+
+Future validation priorities include additional model/backend compatibility, high-concurrency and distributed workloads, and cross-GPU repeatability. Token-ID checks require genuine server-provided IDs; missing cache measurements must be treated as unavailable, not as zero reuse. The observed 66.31% cache-hit ratio is a measured token-counter ratio, not a measured speedup or cost saving. Temperature-zero matching on the tested workloads does not establish universal determinism.
 
 ## Documentation
 

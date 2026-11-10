@@ -100,12 +100,8 @@ The runner launches the local vLLM server, executes the repeatability check and 
 
 Model downloads, sufficient GPU resources and a working CUDA environment are required. Preserve the outputs externally before terminating an ephemeral runtime.
 
-## Interpretation and Limitations
+## Engineering outcome and next validation
 
-This experiment establishes successful **real-server HTTP token-ID acquisition and repeatability verification** for the recorded configuration.
+This experiment establishes successful **real-server HTTP token-ID acquisition and repeatability verification** for the recorded configuration. It advances InferenceGuard from simulated HTTP testing to actual GPU-backed model responses.
 
-Prefix caching was enabled, but this experiment did not independently measure cache hits. The earlier T4 cache experiment separately recorded cached prompt-token counts.
-
-The experiment did not reproduce the NVIDIA H100-specific divergence described in vLLM issue #40896, nor does it establish that the upstream issue has been fixed.
-
-A PASS verdict means the selected token-identity invariant held across the three recorded requests. It is not a universal guarantee of deterministic inference behavior across hardware, models or configurations.
+Prefix caching was enabled in this run, while cache-hit measurements were added in the later [managed-server T4 cache experiment](../vllm_cache_observability_t4/T4_EXPERIMENT_REPORT.md). More model/server configurations and a matched H100 investigation of [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896) are future validation opportunities. The PASS verdict applies to the three observed requests rather than every possible deployment.

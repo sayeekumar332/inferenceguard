@@ -1,7 +1,7 @@
-"""Validate combined real-vLLM token and prefix-cache evidence.
+"""Run and validate a controlled real-vLLM token and prefix-cache experiment.
 
-P4.1 implements offline evidence validation only.
-GPU experiment execution will be added in a later milestone.
+Manage server startup, health and metrics preflight, inference verification,
+evidence collection, and cleanup in a reproducible GPU workflow.
 """
 
 import json
