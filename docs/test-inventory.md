@@ -10,7 +10,7 @@ This is an engineering-oriented map of **each named automated test**, its core a
 
 **Count distinction:** pytest reported **170 passed** at the P5.2 checkpoint, although there are **133 named test functions**. Parameterized functions run multiple combinations and therefore contribute more than one collected pytest case. This document lists each named function once and identifies parameterized scenarios where relevant. It does not assert that each function represents exactly one collected case.
 
-**Evidence distinction:** Most tests run on a CPU using fakes, monkeypatching, or local mock HTTP servers. Some validate **previously recorded real NVIDIA Tesla T4 evidence**, but do not execute a GPU workload themselves. The actual GPU experiment and its limits are documented separately.
+**Verification design:** Fast CPU tests cover success and failure conditions, while separate tests check the consistency of **recorded real NVIDIA Tesla T4 evidence**. The actual GPU experiments are documented independently. Together, these approaches provide rapid regression feedback and hardware-backed integration evidence.
 
 ## Coverage map
 
@@ -319,13 +319,11 @@ python -m pytest tests/test_core.py::test_corrupted_tokens_fail -v
 - **Reproducible evidence:** archived GPU reports and the managed experiment runner have independently testable consistency, lifecycle, and failure-handling contracts.
 - **Customer demonstration reproducibility:** the three local simulated scenarios exercise documented PASS, FAIL and UNAVAILABLE outcomes through actual HTTP interactions.
 
-## What the tests do *not* establish
+## Coverage boundaries and future validation
 
-- That every test executes inference on the NVIDIA GPU. Most run without a GPU.
-- That the original H100-based [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896) has been reproduced or resolved.
-- Universal determinism across models, GPU architectures, vLLM revisions, or concurrent/distributed serving.
-- Measured performance gain or cost reduction from prefix caching.
-- Production-grade security certification, authenticated artifact provenance, or immunity to server-side traffic contamination.
+The automated suite checks the **implemented verification behavior** on a CPU and validates archived GPU evidence, while actual NVIDIA Tesla T4 inference was exercised separately. Next extensions are cross-GPU and cross-backend studies, concurrent or distributed workloads, and stronger evidence provenance.
+
+The checks do not establish universal determinism, measured latency or cost improvements, or security certification. Reproducing the original H100-based [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896) would require an appropriately matched separate experiment.
 
 For actual GPU evidence, see the [managed-server Tesla T4 experiment report](../experiments/vllm_cache_observability_t4/T4_EXPERIMENT_REPORT.md) and the [earlier T4 experiment](../experiments/t4_qwen3_0_6b/README.md). For customer-facing scenarios, see the [P5.2 demonstration guide](../demos/customer_demo/README.md).
 
