@@ -12,7 +12,7 @@ The project has been validated on a real **NVIDIA Tesla T4 GPU** using **vLLM 0.
 - 1,120 prefix-cache hit tokens
 - 66.31% aggregate token-level cache-hit ratio
 
-These measurements apply to the tested configuration only. For details, evidence, and limitations, see the [NVIDIA Tesla T4 Experiment Report](../../experiments/vllm_cache_observability_t4/T4_EXPERIMENT_REPORT.md).
+These results provide real-hardware evidence for the integrated verification workflow. For the environment, measurements and methodology, see the [NVIDIA Tesla T4 Experiment Report](../../experiments/vllm_cache_observability_t4/T4_EXPERIMENT_REPORT.md).
 
 ## Customer demonstration suite
 
@@ -83,12 +83,11 @@ git diff --check
 
 At the completion of the three demonstration scenarios, the full regression suite contained **170 passing tests**.
 
-## Limitations
+## Scope and next validation opportunities
 
-- The three local demonstrations use simulated responses and token IDs; the separate Tesla T4 experiment used actual language-model inference.
-- The observed cache-hit ratio is not a measured latency improvement or cost reduction.
-- One controlled GPU experiment does not establish determinism across models, hardware, or vLLM versions.
-- The work does not reproduce or resolve upstream [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896).
+The local demonstrations use intentionally simulated token IDs to make successful, failing, and unavailable-metrics outcomes reproducible on a normal computer. The separately archived Tesla T4 experiment supplies **real model-inference evidence**.
+
+Additional GPUs, models, serving configurations and deployment workloads are natural next validation targets. The observed cache-hit ratio measures token reuse, rather than latency or financial savings; the original [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896) remains a motivating scenario, not a reproduced or resolved upstream defect.
 
 ## Conclusion
 
