@@ -582,3 +582,69 @@ def test_environment_metadata_records_experiment_configuration(monkeypatch):
     assert metadata["comparison_mode"] == "tokens"
     assert metadata["max_tokens"] == 24
     assert "--enable-prefix-caching" in metadata["server_command"]
+
+
+def test_experiment_entrypoint_saves_metadata_and_runs(monkeypatch, tmp_path):
+    import json
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    calls = []
+
+    def fake_metadata():
+        calls.append("metadata")
+        return {
+            "gpu": "NVIDIA Tesla T4",
+            "vllm_version": "0.33.0",
+        }
+
+    def fake_run(vllm_executable, python_executable, output_dir):
+        assert vllm_executable == "/usr/bin/vllm"
+        assert python_executable == "/usr/bin/python3"
+        assert output_dir == tmp_path
+        assert (tmp_path / "environment.json").is_file()
+        calls.append("experiment")
+        return {"verdict": "PASS", "cache_status": "AVAILABLE"}
+
+    monkeypatch.setattr(run_experiment, "collect_environment_metadata", fake_metadata)
+    monkeypatch.setattr(run_experiment, "run_controlled_experiment", fake_run)
+
+    result = run_experiment.run_experiment_entrypoint("/usr/bin/vllm", "/usr/bin/python3", tmp_path)
+
+    metadata = json.loads((tmp_path / "environment.json").read_text(encoding="utf-8"))
+
+    assert metadata["gpu"] == "NVIDIA Tesla T4"
+    assert result["verdict"] == "PASS"
+    assert calls == ["metadata", "experiment"]
+
+
+def test_experiment_entrypoint_preserves_failure_diagnostics(monkeypatch, tmp_path):
+    import json
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    monkeypatch.setattr(
+        run_experiment,
+        "collect_environment_metadata",
+        lambda: {"gpu": "NVIDIA Tesla T4"},
+    )
+
+    def failing_experiment(vllm_executable, python_executable, output_dir):
+        raise RuntimeError("Metrics preflight failed")
+
+    monkeypatch.setattr(
+        run_experiment,
+        "run_controlled_experiment",
+        failing_experiment,
+    )
+
+    with pytest.raises(RuntimeError, match="Metrics preflight failed"):
+        run_experiment.run_experiment_entrypoint("/usr/bin/vllm", "/usr/bin/python3", tmp_path)
+
+    assert (tmp_path / "environment.json").is_file()
+    assert (tmp_path / "failure.json").is_file()
+
+    failure = json.loads((tmp_path / "failure.json").read_text(encoding="utf-8"))
+
+    assert failure["error_type"] == "RuntimeError"
+    assert "Metrics preflight failed" in failure["message"]

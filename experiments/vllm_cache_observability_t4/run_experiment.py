@@ -310,3 +310,46 @@ def collect_environment_metadata() -> dict:
         "prefix_caching": "enabled",
         "server_command": server_command,
     }
+
+
+def run_experiment_entrypoint(
+    vllm_executable: str,
+    python_executable: str,
+    output_dir: Path,
+) -> dict:
+    """Save experiment metadata, run validation, and preserve failures."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    environment_path = output_dir / "environment.json"
+    failure_path = output_dir / "failure.json"
+
+    # Prevent an old failure report from being mistaken for a new one.
+    failure_path.unlink(missing_ok=True)
+
+    try:
+        metadata = collect_environment_metadata()
+
+        environment_path.write_text(
+            json.dumps(metadata, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        return run_controlled_experiment(
+            vllm_executable,
+            python_executable,
+            output_dir,
+        )
+
+    except Exception as exc:
+        failure = {
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+        }
+
+        failure_path.write_text(
+            json.dumps(failure, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        raise
