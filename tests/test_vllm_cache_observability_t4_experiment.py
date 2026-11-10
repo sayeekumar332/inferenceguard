@@ -648,3 +648,51 @@ def test_experiment_entrypoint_preserves_failure_diagnostics(monkeypatch, tmp_pa
 
     assert failure["error_type"] == "RuntimeError"
     assert "Metrics preflight failed" in failure["message"]
+
+
+def test_experiment_main_invokes_entrypoint(monkeypatch, tmp_path):
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    calls = []
+
+    monkeypatch.setattr(
+        run_experiment.shutil,
+        "which",
+        lambda executable: "/usr/bin/vllm" if executable == "vllm" else None,
+    )
+    monkeypatch.setattr(
+        run_experiment.sys,
+        "executable",
+        "/usr/bin/python3",
+    )
+    monkeypatch.setattr(run_experiment, "OUTPUT_DIR", tmp_path, raising=False)
+
+    def fake_entrypoint(vllm_executable, python_executable, output_dir):
+        calls.append((vllm_executable, python_executable, output_dir))
+        return {"verdict": "PASS", "cache_status": "AVAILABLE"}
+
+    monkeypatch.setattr(
+        run_experiment,
+        "run_experiment_entrypoint",
+        fake_entrypoint,
+    )
+
+    assert run_experiment.main() == 0
+    assert calls == [("/usr/bin/vllm", "/usr/bin/python3", tmp_path)]
+
+
+def test_experiment_prompt_has_substantial_shared_prefix():
+    from experiments.vllm_cache_observability_t4.run_experiment import (
+        build_inferenceguard_command,
+    )
+
+    command = build_inferenceguard_command(
+        "/usr/bin/python3",
+        "evidence/repeatability.json",
+    )
+
+    prompt = command[command.index("--prompt") + 1]
+
+    assert len(prompt.split()) >= 256
+    assert command[command.index("--repeats") + 1] == "3"
+    assert "--observe-prefix-cache" in command

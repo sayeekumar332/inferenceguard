@@ -6,6 +6,7 @@ GPU experiment execution will be added in a later milestone.
 
 import json
 import math
+import shutil
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -21,6 +22,16 @@ from inferenceguard.prefix_cache_metrics import (
     calculate_cache_delta,
     fetch_prefix_cache_metrics,
 )
+
+OUTPUT_DIR = Path("experiments/vllm_cache_observability_t4/evidence")
+
+CACHE_TEST_PROMPT = (
+    "Inference regression testing compares generated token sequences "
+    "across repeated requests using identical model configuration, "
+    "sampling parameters, input prompts, and inference server settings. "
+    "Prefix caching reuses previously computed attention states, "
+    "so verification must distinguish cold requests from warmed requests. "
+) * 12 + "\nSummarize the importance of deterministic inference verification."
 
 
 def validate_cache_report(report, exit_code):
@@ -167,7 +178,7 @@ def build_inferenceguard_command(
         "--model",
         "Qwen/Qwen3-0.6B",
         "--prompt",
-        "Explain why deterministic inference verification is important.",
+        CACHE_TEST_PROMPT,
         "--repeats",
         "3",
         "--comparison-mode",
@@ -353,3 +364,32 @@ def run_experiment_entrypoint(
         )
 
         raise
+
+
+def main() -> int:
+    """Execute the reproducible vLLM cache-observability experiment."""
+    vllm_executable = shutil.which("vllm")
+
+    if vllm_executable is None:
+        print("ERROR: vLLM executable not found", file=sys.stderr)
+        return 1
+
+    try:
+        result = run_experiment_entrypoint(
+            vllm_executable,
+            sys.executable,
+            OUTPUT_DIR,
+        )
+    except Exception as exc:
+        print(f"Experiment failed: {exc}", file=sys.stderr)
+        return 1
+
+    print("Controlled experiment: PASS")
+    print("Token verdict:", result["verdict"])
+    print("Cache observability:", result["cache_status"])
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
