@@ -175,3 +175,33 @@ def test_reject_invalid_snapshot_values(invalid_value):
 
     with pytest.raises(ValueError):
         calculate_cache_delta(before, after)
+
+
+def test_parser_accepts_real_vllm_float_counters():
+    from inferenceguard.prefix_cache_metrics import parse_prefix_cache_metrics
+
+    metrics = """
+vllm:prefix_cache_queries_total{engine="0",model_name="Qwen/Qwen3-0.6B"} 256.0
+vllm:prefix_cache_queries_created{engine="0",model_name="Qwen/Qwen3-0.6B"} 1794300852.0
+vllm:prefix_cache_hits_total{engine="0",model_name="Qwen/Qwen3-0.6B"} 224.0
+vllm:prefix_cache_hits_created{engine="0",model_name="Qwen/Qwen3-0.6B"} 1794300852.0
+"""
+
+    assert parse_prefix_cache_metrics(metrics) == {
+        "queries": 256,
+        "hits": 224,
+    }
+
+
+def test_parser_rejects_fractional_prometheus_counters():
+    import pytest
+
+    from inferenceguard.prefix_cache_metrics import parse_prefix_cache_metrics
+
+    metrics = """
+vllm:prefix_cache_queries_total 10.5
+vllm:prefix_cache_hits_total 4.0
+"""
+
+    with pytest.raises(ValueError):
+        parse_prefix_cache_metrics(metrics)

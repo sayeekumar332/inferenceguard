@@ -3,6 +3,7 @@
 import re
 import urllib.error
 import urllib.request
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
 METRIC_PATTERN = re.compile(
@@ -33,6 +34,15 @@ def parse_prefix_cache_metrics(metrics_text: str) -> dict[str, int]:
         if not line.startswith(METRIC_PREFIX):
             continue
 
+        # Prometheus counter creation timestamps are not cache counters.
+        if line.startswith(
+            (
+                "vllm:prefix_cache_queries_created",
+                "vllm:prefix_cache_hits_created",
+            )
+        ):
+            continue
+
         match = METRIC_PATTERN.fullmatch(line)
 
         if match is None:
@@ -44,10 +54,15 @@ def parse_prefix_cache_metrics(metrics_text: str) -> dict[str, int]:
         if metric_type in counters:
             raise ValueError(f"Duplicate prefix-cache metric: {metric_type}")
 
-        if not raw_value.isdecimal():
+        try:
+            value = Decimal(raw_value)
+        except InvalidOperation as exc:
+            raise ValueError(f"Invalid prefix-cache counter: {raw_value}") from exc
+
+        if not value.is_finite() or value < 0 or value != value.to_integral_value():
             raise ValueError(f"Invalid prefix-cache counter: {raw_value}")
 
-        counters[metric_type] = int(raw_value)
+        counters[metric_type] = int(value)
 
     if "queries" not in counters or "hits" not in counters:
         raise ValueError("Missing required prefix-cache query or hit counter")
