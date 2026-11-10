@@ -2,11 +2,11 @@
 
 **Version:** `0.1.0a0` · **Scope:** evidence-based AI inference regression detection · **Milestone:** P5.2 (170 passing tests)
 
-## 1. Engineering objective and verification boundaries
+## 1. Engineering objective and implemented solution
 
-InferenceGuard detects observable differences between reference and candidate inference evidence, and between repeated requests sent to the same inference endpoint. It produces explicit verdicts and machine-readable reports. It is designed for **regression detection and observability**, not a guarantee of semantic correctness, universal numerical determinism, or a change to vLLM internals.
+InferenceGuard detects observable differences between reference and candidate inference evidence, and between repeated requests sent to the same inference endpoint. It produces explicit verdicts and machine-readable reports, helping engineering teams identify the request that diverged and the evidence supporting that result.
 
-The related [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896) illustrates the type of first-request/warm-request divergence that motivates the tool. InferenceGuard has **not** reproduced or fixed that issue.
+The related [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896) illustrates the value of first-request/warm-request verification. InferenceGuard provides an independent regression-detection and cache-observability layer, with verification boundaries and potential extensions explained later in this document.
 
 ## 2. Implemented verification workflows
 
@@ -126,7 +126,7 @@ Following P5.2, **170 tests passed**, with Ruff lint and formatting checks clean
 
 These are controlled simulated cases, **not real model inference**. See [customer demo guide](../demos/customer_demo/README.md).
 
-## 8. Current integration boundaries and next research
+## 8. Next engineering extensions
 
 Implemented capabilities include real HTTP token-ID acquisition, opt-in metrics observation, a managed-server GPU experiment, and reproducible simulated failure demonstrations. Future work includes:
 
