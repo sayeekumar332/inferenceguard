@@ -247,7 +247,7 @@ This is the **later integrated workflow** supporting actual T4 results recorded 
 | `run_experiment_entrypoint(vllm_executable: str, python_executable: str, output_dir: Path) -> dict` | `vllm_executable`: server binary; `python_executable`: Python binary; `output_dir`: artifact destination | Writes `environment.json`, runs controlled experiment and writes `failure.json` on exception |
 | `main() -> int` | None; discovers `vllm` and current Python | Top-level runner; returns 0 on validated success, 1 on detected execution failure |
 
-**Implementation note:** the module's introductory docstring still refers to offline-only validation as future GPU work. That comment is outdated: the actual module contains server startup, preflight, inference execution, and cleanup, and the experiment has already been run. This documentation reflects the **current executable functions**. Correcting that stale source comment can be handled by a separate code-maintenance PR.
+**Implemented workflow:** this runner starts and manages a vLLM server, checks readiness and cache metrics, executes real HTTP verification, validates evidence, and cleans up. The source module header has been updated to match this functionality.
 
 ### Real GPU evidence from this workflow
 
@@ -333,14 +333,14 @@ python -m demos.customer_demo.healthy_demo \
   --output /tmp/inferenceguard_healthy.json
 ```
 
-## 17. Interface contracts and limitations
+## 17. Interface contracts and next extensions
 
 - `compare` produces offline `PASS`, `FAIL`, `INCOMPATIBLE` outcomes; `repeat` produces `PASS`, `FAIL`, `INCONCLUSIVE`.
 - Successful inference and successful cache observability are **not identical**. Check `cache_observability.status` independently when cache metrics are required.
 - The HTTP client requires a server-specific token-ID response extension in token mode; a server that omits token IDs cannot produce genuine token-level PASS evidence.
 - Prometheus prefix-cache counters are not inherently request-scoped; unrelated workloads can affect observed deltas.
 - The demo responses and token IDs are **simulated**; the archived T4 experiments use real vLLM inference.
-- The code and signatures shown are the current alpha interface, **not a commitment to long-term API stability**.
+- These signatures describe the current `0.1.0a0` alpha implementation. Later releases may refine interfaces as backend coverage grows.
 
 ## Related references
 
