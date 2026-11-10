@@ -4,13 +4,34 @@ P4.1 implements offline evidence validation only.
 GPU experiment execution will be added in a later milestone.
 """
 
+import json
 import math
+import shutil
+import subprocess
+import sys
+from contextlib import contextmanager
+from importlib.metadata import version
+from pathlib import Path
 
-from experiments.vllm_http_t4.run_experiment import validate_report
+from experiments.vllm_http_t4.run_experiment import (
+    gpu_name,
+    validate_report,
+    wait_for_server,
+)
 from inferenceguard.prefix_cache_metrics import (
     calculate_cache_delta,
     fetch_prefix_cache_metrics,
 )
+
+OUTPUT_DIR = Path("experiments/vllm_cache_observability_t4/evidence")
+
+CACHE_TEST_PROMPT = (
+    "Inference regression testing compares generated token sequences "
+    "across repeated requests using identical model configuration, "
+    "sampling parameters, input prompts, and inference server settings. "
+    "Prefix caching reuses previously computed attention states, "
+    "so verification must distinguish cold requests from warmed requests. "
+) * 12 + "\nSummarize the importance of deterministic inference verification."
 
 
 def validate_cache_report(report, exit_code):
@@ -157,7 +178,7 @@ def build_inferenceguard_command(
         "--model",
         "Qwen/Qwen3-0.6B",
         "--prompt",
-        "Explain why deterministic inference verification is important.",
+        CACHE_TEST_PROMPT,
         "--repeats",
         "3",
         "--comparison-mode",
@@ -192,3 +213,183 @@ def check_metrics_preflight(base_url: str) -> dict[str, int]:
     print("Prefix-cache hit tokens:", snapshot["hits"])
 
     return snapshot
+
+
+@contextmanager
+def managed_vllm_server(command: list[str], log_path: Path):
+    """Start vLLM and guarantee subprocess cleanup."""
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with log_path.open("w", encoding="utf-8") as log_file:
+        process = subprocess.Popen(  # noqa: S603
+            command,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+        )
+
+        try:
+            yield process
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            else:
+                process.wait()
+
+
+def prepare_server_for_inference(process):
+    """Require server readiness and valid cache metrics before inference."""
+    wait_for_server(process)
+    return check_metrics_preflight("http://127.0.0.1:8000")
+
+
+def execute_inferenceguard(
+    python_executable: str,
+    report_path: Path,
+) -> dict:
+    """Execute InferenceGuard and independently validate its evidence."""
+    report_path = Path(report_path)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+
+    command = build_inferenceguard_command(
+        python_executable,
+        str(report_path),
+    )
+
+    # Never allow an earlier report to masquerade as a new result.
+    report_path.unlink(missing_ok=True)
+
+    result = subprocess.run(command, check=False)  # noqa: S603
+
+    if not report_path.is_file():
+        raise RuntimeError("InferenceGuard report was not generated")
+
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Invalid InferenceGuard JSON report") from exc
+
+    return validate_cache_report(report, result.returncode)
+
+
+def run_controlled_experiment(
+    vllm_executable: str,
+    python_executable: str,
+    output_dir: Path,
+) -> dict:
+    """Run a controlled vLLM experiment with guaranteed server cleanup."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    server_command = build_server_command(vllm_executable)
+    server_log = output_dir / "server.log"
+    report_path = output_dir / "repeatability.json"
+
+    with managed_vllm_server(server_command, server_log) as process:
+        # Inference must not begin until health and metrics checks pass.
+        prepare_server_for_inference(process)
+
+        # This function also independently validates token and cache evidence.
+        result = execute_inferenceguard(
+            python_executable,
+            report_path,
+        )
+
+    # The context manager has already shut down the server here.
+    return result
+
+
+def collect_environment_metadata() -> dict:
+    """Collect reproducible GPU experiment environment metadata."""
+    server_command = build_server_command("vllm")
+
+    return {
+        "gpu": gpu_name(),
+        "model": "Qwen/Qwen3-0.6B",
+        "vllm_version": version("vllm"),
+        "python_version": sys.version.split()[0],
+        "precision": "float16",
+        "temperature": 0,
+        "repeats": 3,
+        "comparison_mode": "tokens",
+        "max_tokens": 24,
+        "prefix_caching": "enabled",
+        "server_command": server_command,
+    }
+
+
+def run_experiment_entrypoint(
+    vllm_executable: str,
+    python_executable: str,
+    output_dir: Path,
+) -> dict:
+    """Save experiment metadata, run validation, and preserve failures."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    environment_path = output_dir / "environment.json"
+    failure_path = output_dir / "failure.json"
+
+    # Prevent an old failure report from being mistaken for a new one.
+    failure_path.unlink(missing_ok=True)
+
+    try:
+        metadata = collect_environment_metadata()
+
+        environment_path.write_text(
+            json.dumps(metadata, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        return run_controlled_experiment(
+            vllm_executable,
+            python_executable,
+            output_dir,
+        )
+
+    except Exception as exc:
+        failure = {
+            "error_type": type(exc).__name__,
+            "message": str(exc),
+        }
+
+        failure_path.write_text(
+            json.dumps(failure, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+        raise
+
+
+def main() -> int:
+    """Execute the reproducible vLLM cache-observability experiment."""
+    vllm_executable = shutil.which("vllm")
+
+    if vllm_executable is None:
+        print("ERROR: vLLM executable not found", file=sys.stderr)
+        return 1
+
+    try:
+        result = run_experiment_entrypoint(
+            vllm_executable,
+            sys.executable,
+            OUTPUT_DIR,
+        )
+    except Exception as exc:
+        print(f"Experiment failed: {exc}", file=sys.stderr)
+        return 1
+
+    print("Controlled experiment: PASS")
+    print("Token verdict:", result["verdict"])
+    print("Cache observability:", result["cache_status"])
+
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
