@@ -102,3 +102,6 @@ checkpoints/
 # Keep version-controlled examples and test fixtures
 !examples/
 !tests/fixtures/
+
+# Local raw GPU experiment logs
+experiments/vllm_cache_observability_t4/evidence/*.log
