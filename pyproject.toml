@@ -12,6 +12,31 @@ license = "MIT"
 authors = [{name = "InferenceGuard contributors"}]
 dependencies = []
 
+keywords = [
+    "ai-inference",
+    "inference-verification",
+    "regression-testing",
+    "vllm",
+    "prefix-cache",
+    "llm-observability",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
+
+[project.urls]
+Repository = "https://github.com/sayeekumar332/inferenceguard"
+Documentation = "https://github.com/sayeekumar332/inferenceguard/tree/main/docs"
+Issues = "https://github.com/sayeekumar332/inferenceguard/issues"
+
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "ruff>=0.9,<1", "build>=1,<2", "pip-audit>=2,<3"]
 
