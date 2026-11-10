@@ -211,3 +211,80 @@ def test_metrics_preflight_rejects_unavailable_endpoint(monkeypatch):
 
     with pytest.raises(RuntimeError, match="Metrics"):
         run_experiment.check_metrics_preflight("http://127.0.0.1:8000")
+
+
+def test_server_lifecycle_starts_and_stops(monkeypatch, tmp_path):
+    from unittest.mock import MagicMock
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    process = MagicMock()
+    process.poll.return_value = None
+
+    popen = MagicMock(return_value=process)
+    monkeypatch.setattr(run_experiment.subprocess, "Popen", popen)
+
+    with run_experiment.managed_vllm_server(
+        ["/usr/bin/vllm", "serve", "test-model"],
+        tmp_path / "server.log",
+    ) as running:
+        assert running is process
+
+    popen.assert_called_once()
+    process.terminate.assert_called_once()
+    process.wait.assert_called_once_with(timeout=15)
+
+
+def test_server_lifecycle_cleans_up_after_failure(monkeypatch, tmp_path):
+    from unittest.mock import MagicMock
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    process = MagicMock()
+    process.poll.return_value = None
+
+    monkeypatch.setattr(
+        run_experiment.subprocess,
+        "Popen",
+        MagicMock(return_value=process),
+    )
+
+    with pytest.raises(RuntimeError, match="Experiment failed"):
+        with run_experiment.managed_vllm_server(
+            ["/usr/bin/vllm", "serve", "test-model"],
+            tmp_path / "server.log",
+        ):
+            raise RuntimeError("Experiment failed")
+
+    process.terminate.assert_called_once()
+    process.wait.assert_called_once_with(timeout=15)
+
+
+def test_server_lifecycle_kills_after_shutdown_timeout(monkeypatch, tmp_path):
+    import subprocess
+    from unittest.mock import MagicMock
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    process = MagicMock()
+    process.poll.return_value = None
+    process.wait.side_effect = [
+        subprocess.TimeoutExpired(cmd="vllm", timeout=15),
+        0,
+    ]
+
+    monkeypatch.setattr(
+        run_experiment.subprocess,
+        "Popen",
+        MagicMock(return_value=process),
+    )
+
+    with run_experiment.managed_vllm_server(
+        ["/usr/bin/vllm", "serve", "test-model"],
+        tmp_path / "server.log",
+    ):
+        pass
+
+    process.terminate.assert_called_once()
+    process.kill.assert_called_once()
+    assert process.wait.call_count == 2

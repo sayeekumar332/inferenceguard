@@ -5,6 +5,9 @@ GPU experiment execution will be added in a later milestone.
 """
 
 import math
+import subprocess
+from contextlib import contextmanager
+from pathlib import Path
 
 from experiments.vllm_http_t4.run_experiment import validate_report
 from inferenceguard.prefix_cache_metrics import (
@@ -192,3 +195,30 @@ def check_metrics_preflight(base_url: str) -> dict[str, int]:
     print("Prefix-cache hit tokens:", snapshot["hits"])
 
     return snapshot
+
+
+@contextmanager
+def managed_vllm_server(command: list[str], log_path: Path):
+    """Start vLLM and guarantee subprocess cleanup."""
+    log_path = Path(log_path)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with log_path.open("w", encoding="utf-8") as log_file:
+        process = subprocess.Popen(  # noqa: S603
+            command,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+        )
+
+        try:
+            yield process
+        finally:
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
+            else:
+                process.wait()
