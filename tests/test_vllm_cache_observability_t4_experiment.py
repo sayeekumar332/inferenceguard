@@ -288,3 +288,78 @@ def test_server_lifecycle_kills_after_shutdown_timeout(monkeypatch, tmp_path):
     process.terminate.assert_called_once()
     process.kill.assert_called_once()
     assert process.wait.call_count == 2
+
+
+def test_server_preflight_accepts_healthy_server_and_metrics(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    server = MagicMock()
+    calls = []
+
+    def fake_wait(process):
+        assert process is server
+        calls.append("health")
+
+    def fake_metrics(base_url):
+        assert base_url == "http://127.0.0.1:8000"
+        calls.append("metrics")
+        return {"queries": 100, "hits": 40}
+
+    monkeypatch.setattr(run_experiment, "wait_for_server", fake_wait, raising=False)
+    monkeypatch.setattr(
+        run_experiment,
+        "check_metrics_preflight",
+        fake_metrics,
+    )
+
+    snapshot = run_experiment.prepare_server_for_inference(server)
+
+    assert snapshot == {"queries": 100, "hits": 40}
+    assert calls == ["health", "metrics"]
+
+
+def test_server_preflight_rejects_early_server_exit(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    def fake_wait(process):
+        raise RuntimeError("vLLM server exited before becoming ready")
+
+    metrics = MagicMock()
+
+    monkeypatch.setattr(run_experiment, "wait_for_server", fake_wait, raising=False)
+    monkeypatch.setattr(
+        run_experiment,
+        "check_metrics_preflight",
+        metrics,
+    )
+
+    with pytest.raises(RuntimeError, match="exited"):
+        run_experiment.prepare_server_for_inference(MagicMock())
+
+    metrics.assert_not_called()
+
+
+def test_server_preflight_rejects_unavailable_metrics(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    def fake_wait(process):
+        return None
+
+    def fake_metrics(base_url):
+        raise RuntimeError("Metrics preflight failed")
+
+    monkeypatch.setattr(run_experiment, "wait_for_server", fake_wait, raising=False)
+    monkeypatch.setattr(
+        run_experiment,
+        "check_metrics_preflight",
+        fake_metrics,
+    )
+
+    with pytest.raises(RuntimeError, match="Metrics preflight failed"):
+        run_experiment.prepare_server_for_inference(MagicMock())

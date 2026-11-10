@@ -9,7 +9,10 @@ import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 
-from experiments.vllm_http_t4.run_experiment import validate_report
+from experiments.vllm_http_t4.run_experiment import (
+    validate_report,
+    wait_for_server,
+)
 from inferenceguard.prefix_cache_metrics import (
     calculate_cache_delta,
     fetch_prefix_cache_metrics,
@@ -222,3 +225,9 @@ def managed_vllm_server(command: list[str], log_path: Path):
                     process.wait()
             else:
                 process.wait()
+
+
+def prepare_server_for_inference(process):
+    """Require server readiness and valid cache metrics before inference."""
+    wait_for_server(process)
+    return check_metrics_preflight("http://127.0.0.1:8000")
