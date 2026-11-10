@@ -1,0 +1,125 @@
+{
+  "verdict": "PASS",
+  "requested": 3,
+  "completed": 3,
+  "observations": [
+    {
+      "text": " \n\nThe importance of deterministic inference verification is that it ensures that the generated token sequences are consistent across repeated requests, which is",
+      "finish_reason": "length",
+      "token_ids": [
+        4710,
+        785,
+        12650,
+        315,
+        72349,
+        44378,
+        22901,
+        374,
+        429,
+        432,
+        25351,
+        429,
+        279,
+        7907,
+        3950,
+        23700,
+        525,
+        12966,
+        3941,
+        11504,
+        7388,
+        11,
+        892,
+        374
+      ]
+    },
+    {
+      "text": " \n\nThe importance of deterministic inference verification is that it ensures that the generated token sequences are consistent across repeated requests, which is",
+      "finish_reason": "length",
+      "token_ids": [
+        4710,
+        785,
+        12650,
+        315,
+        72349,
+        44378,
+        22901,
+        374,
+        429,
+        432,
+        25351,
+        429,
+        279,
+        7907,
+        3950,
+        23700,
+        525,
+        12966,
+        3941,
+        11504,
+        7388,
+        11,
+        892,
+        374
+      ]
+    },
+    {
+      "text": " \n\nThe importance of deterministic inference verification is that it ensures that the generated token sequences are consistent across repeated requests, which is",
+      "finish_reason": "length",
+      "token_ids": [
+        4710,
+        785,
+        12650,
+        315,
+        72349,
+        44378,
+        22901,
+        374,
+        429,
+        432,
+        25351,
+        429,
+        279,
+        7907,
+        3950,
+        23700,
+        525,
+        12966,
+        3941,
+        11504,
+        7388,
+        11,
+        892,
+        374
+      ]
+    }
+  ],
+  "mismatch_indices": [],
+  "error": null,
+  "cache_observability": {
+    "status": "AVAILABLE",
+    "initial_error": null,
+    "deltas": [
+      {
+        "queries": 563,
+        "hits": 0,
+        "hit_rate": 0.0
+      },
+      {
+        "queries": 563,
+        "hits": 560,
+        "hit_rate": 0.9946714031971581
+      },
+      {
+        "queries": 563,
+        "hits": 560,
+        "hit_rate": 0.9946714031971581
+      }
+    ],
+    "errors": [
+      null,
+      null,
+      null
+    ]
+  }
+}

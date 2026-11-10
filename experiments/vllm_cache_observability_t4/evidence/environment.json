@@ -1,0 +1,28 @@
+{
+  "gpu": "Tesla T4",
+  "model": "Qwen/Qwen3-0.6B",
+  "vllm_version": "0.33.0",
+  "python_version": "3.13.16",
+  "precision": "float16",
+  "temperature": 0,
+  "repeats": 3,
+  "comparison_mode": "tokens",
+  "max_tokens": 24,
+  "prefix_caching": "enabled",
+  "server_command": [
+    "vllm",
+    "serve",
+    "Qwen/Qwen3-0.6B",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "8000",
+    "--dtype",
+    "float16",
+    "--max-model-len",
+    "2048",
+    "--gpu-memory-utilization",
+    "0.75",
+    "--enable-prefix-caching"
+  ]
+}
