@@ -2,52 +2,42 @@
 
 **AI Inference Regression Detection & Evidence-Based Verification**
 
-**Version:** `0.1.0a0` | **Development stage:** Alpha | **License:** MIT
+**Version:** `0.1.0a0` | **Stage:** Alpha | **License:** MIT | **Python:** 3.11+
 
-InferenceGuard is an open-source Python verification tool for detecting inference-output regressions, evaluating repeatability, and generating reproducible engineering evidence. It helps AI infrastructure engineers determine **what changed, which requests diverged, and which comparison invariants were violated**—using automated checks rather than manual inspection of generated responses.
+InferenceGuard is an open-source Python verification tool for detecting inference-output regressions, evaluating repeatability, and producing inspectable engineering evidence. It provides **offline reference-versus-candidate comparison**, **live HTTP completion checks**, **generated token-ID verification**, and **optional vLLM prefix-cache observability**.
 
-The project combines **offline differential verification**, **live HTTP completion repeatability testing**, **generated token-ID comparison logic**, and **documented NVIDIA GPU experimentation**. Its design emphasizes measurable results, inspectable evidence, and incremental verification suitable for engineering and CI workflows.
+It is intended for inference engineers investigating changes across model versions, serving configurations, and cache behavior. Its verdicts assess specified observable invariants—not the semantic quality of model answers.
 
-## Why InferenceGuard?
+## What is implemented
 
-Identical inference requests can yield different outputs when model revisions, serving configurations, numerical execution paths, or caching behavior change. Detecting such differences is only the first step: engineers also need to identify the affected requests, retain their observations, and separate demonstrable regressions from missing or incompatible evidence.
-
-InferenceGuard provides a focused workflow for these tasks:
-
-- **Detect** differences in repeated responses or reference/candidate observations.
-- **Compare** generated text, token IDs, and supported log-probability measurements.
-- **Classify** results as `PASS`, `FAIL`, or an evidence/compatibility outcome, as appropriate to the command.
-- **Preserve** machine-readable results and documented experimental observations for subsequent investigation.
-
-## Implemented Capabilities
-
-| Capability | Current implementation |
+| Capability | Status |
 |---|---|
-| Offline reference/candidate comparison | Schema and metadata validation; aligned cases and prompt fingerprints |
-| Token-level differential verification | Generated token-ID identity checks |
-| Log-probability comparison | Optional per-token values with configurable absolute tolerance |
-| HTTP repeatability testing | Sequential identical requests to OpenAI-compatible `/v1/completions` endpoints |
-| Text comparison | Default repeated-response comparison with mismatch indices |
-| Token-ID repeatability logic | Explicit token comparison mode using genuine token IDs from a capable observation source |
-| Evidence handling | JSON verification reports and optional HTML reports for offline comparison |
-| Automated verification | 55 passing local tests at the documented milestone; Ruff checks and GitHub Actions CI workflows |
-| Hardware experiment | Preserved NVIDIA Tesla T4 / vLLM prefix-cache observations and CPU-only evidence checks |
+| Offline differential verification | Reference/candidate schema and metadata validation; aligned cases; prompt fingerprints |
+| Token-level comparison | Generated token-ID identity and mismatch detection |
+| Log-probability comparison | Optional per-token comparison with configurable absolute tolerance |
+| Live HTTP repeatability | Sequential repeated calls to OpenAI-compatible `/v1/completions` endpoints |
+| Response comparison modes | `text` or `tokens`; genuine token IDs required for token comparison |
+| Prefix-cache observability | Optional `--observe-prefix-cache`, reading vLLM Prometheus `/metrics` counters around requests |
+| Evidence | Machine-readable JSON reports; optional offline HTML report |
+| Customer demonstrations | Three locally reproducible scenarios using simulated HTTP completion responses |
+| Hardware verification | Real NVIDIA Tesla T4 / vLLM experiments with archived evidence |
+| Automated quality checks | **170 tests passed** on the completed P5.2 milestone; Ruff lint and formatting; GitHub Actions CI |
 
-### Verification outcomes
+### Interpretation of outcomes
 
-| Outcome | Exit code | Interpretation |
+| Outcome | Exit code | Meaning |
 |---|---:|---|
-| `PASS` | `0` | All selected checks completed successfully for the supplied evidence |
-| `FAIL` | `1` | At least one selected comparison invariant was violated |
-| `INCOMPATIBLE` | `2` | Offline runs cannot be compared defensibly because of incompatible metadata or cases |
-| `INCONCLUSIVE` | `2` | Repeatability evidence is incomplete, unavailable, or interrupted by a request failure |
-| Invalid input or execution error | `2` | Validation or command execution did not complete |
+| `PASS` | `0` | Selected inference comparisons passed |
+| `FAIL` | `1` | A selected comparison invariant was violated |
+| `INCOMPATIBLE` | `2` | Offline evidence or metadata cannot be defensibly compared |
+| `INCONCLUSIVE` | `2` | Repeatability evidence was incomplete or unavailable |
+| Input/execution error | `2` | Command or validation did not complete |
 
-These verdicts concern the selected **observable invariants**, not a judgment of the semantic quality of the model's answers.
+**Important:** When cache observability is requested, it is a *separate result* within the JSON report. The `cache_observability.status` value can be `AVAILABLE`, `PARTIAL`, or `UNAVAILABLE`. An inference `PASS` can coexist with `UNAVAILABLE` cache metrics; automation that requires metrics must check this status independently.
 
-## Quick Start
+## Quick start
 
-**Requirements:** Python 3.11 or later.
+Requires Python 3.11 or later. From the repository root:
 
 ```bash
 python3 -m venv .venv
@@ -56,7 +46,7 @@ python -m pip install -e '.[dev]'
 python -m pytest -q
 ```
 
-### 1. Offline differential comparison
+### 1. Offline reference/candidate comparison
 
 ```bash
 inferenceguard compare \
@@ -66,13 +56,11 @@ inferenceguard compare \
   --html reports/result.html
 ```
 
-The example contains a deliberate token mismatch and is expected to return `FAIL` (exit code `1`). Use the reference file for both inputs to exercise a matching comparison (exit code `0`).
+The deliberately faulty candidate should produce `FAIL` (exit code `1`). Comparing the reference file against itself should produce `PASS`. The checker validates compatible model/tokenizer and sampling metadata, case alignment, prompt fingerprints, generated token IDs, and optional log-probability observations.
 
-The offline checker validates model and tokenizer identifiers/revisions, sampling metadata, case alignment, prompt fingerprints, generated token IDs, and optional per-token log-probabilities.
+### 2. Live completion repeatability: text
 
-### 2. Repeated HTTP inference: text mode
-
-Requires an accessible OpenAI-compatible `/v1/completions` endpoint and a valid model name served by that endpoint.
+Requires an accessible OpenAI-compatible completion endpoint:
 
 ```bash
 inferenceguard repeat \
@@ -84,9 +72,11 @@ inferenceguard repeat \
   --output reports/repeatability.json
 ```
 
-InferenceGuard sends repeated requests with temperature set to zero, compares generated completion text against the first response, and records any mismatching request indices.
+Repeated requests use temperature zero. InferenceGuard compares generated text against the first response and records mismatching request indices.
 
-### 3. Token-ID repeatability mode
+### 3. Live token-ID repeatability and prefix-cache observability
+
+For a compatible inference endpoint that provides **genuine generated token IDs**:
 
 ```bash
 inferenceguard repeat \
@@ -95,116 +85,108 @@ inferenceguard repeat \
   --prompt "Hello" \
   --repeats 3 \
   --comparison-mode tokens \
-  --output reports/token_report.json
+  --observe-prefix-cache \
+  --output reports/token_cache_report.json
 ```
 
-The underlying comparator supports genuine generated token-ID sequences and can detect a token difference even when the decoded text is identical. The comparison engine and CLI behavior have been verified with synthetic token-capable clients.
+In token mode the HTTP adapter requests and parses supported token-ID responses; token IDs must actually be supplied by the server. Not every OpenAI-compatible backend supports this. Missing token observations result in inconclusive token-level evidence rather than invented IDs.
 
-**Live adapter integration:** The current HTTP client obtains completion text and finish reasons but does not yet request and parse server-specific generated token-ID fields. Consequently, this mode reports `INCONCLUSIVE` with the current HTTP adapter when token IDs are absent. An upcoming vLLM-compatible adapter enhancement will connect live token acquisition to the existing comparator.
+With `--observe-prefix-cache`, InferenceGuard also attempts to obtain cache-counter deltas from the server's Prometheus `/metrics` endpoint. Failure to read the metrics is recorded explicitly and does not silently change the inference comparison verdict.
 
-## Engineering Case Study: vLLM Prefix-Cache Repeatability
+## Real NVIDIA Tesla T4 verification
 
-**Upstream reference:** [vLLM issue #40896 — First request differs from subsequent identical requests at temperature=0](https://github.com/vllm-project/vllm/issues/40896)
+InferenceGuard has been exercised against an actual GPU-backed vLLM server. The **newer managed-server experiment** used:
 
-The issue describes a repeatability defect in which the first inference result differs from later identical requests when prefix caching is enabled, despite deterministic sampling settings. The report includes an NVIDIA H100 environment.
-
-InferenceGuard addresses **the regression-verification challenges illustrated by this issue** through several implemented mechanisms:
-
-| Engineering challenge | InferenceGuard response | Supporting evidence |
-|---|---|---|
-| First request differs from later requests | First-response baseline and request-indexed mismatch detection | Automated `A → B → B` tests |
-| Decoded output may conceal token-sequence changes | Explicit token-ID comparison mode | Token equality, mismatch, and missing-data tests |
-| Cache reuse must be observed, not assumed | Record cached prompt-token counts in the controlled experiment | Real Tesla T4 results |
-| Findings must be inspectable | Preserve source observations, configuration and comparison reports | Versioned JSON reports and evidence tests |
-| Regression investigation needs reproducible checks | Run repeatability and differential checks with defined conditions | CLI, pytest suite, and documented methodology |
-
-**Engineering outcome:** InferenceGuard implements mechanisms for identifying repeated-request divergence, comparing token-level observations, and producing structured evidence relevant to this class of inference regression. These capabilities address detection and diagnosis; changes to vLLM's internal caching or compute kernels remain an upstream responsibility.
-
-### Why we selected NVIDIA Tesla T4 instead of H100
-
-The original report used NVIDIA H100 hardware. For InferenceGuard's first controlled hardware experiment, we selected the **NVIDIA Tesla T4 available through Google Colab Free**, for three concrete reasons:
-
-1. **Real inference execution:** T4 supports CUDA inference and was sufficient to run Qwen3-0.6B with FP16 and exercise vLLM prefix caching.
-2. **A focused test objective:** The initial goal was to validate controlled request repetition, actual cache reuse, token-ID capture, and evidence preservation—not to claim hardware-identical reproduction of an H100-specific failure.
-3. **Resource-efficient reproducibility:** The experiment used ₹0 GPU expenditure, with scripts and JSON observations saved persistently so further verification could run on a CPU.
-
-The GPUs differ in architecture (Turing versus Hopper), compute capability, precision support, and available kernels. These differences matter for exact bug reproduction; accordingly, the T4 result is a **verified hardware baseline for our methodology**, while evaluating the original H100 failure requires a matching environment and test configuration.
-
-### Real-GPU experiment: setup and results
-
-| Parameter | Recorded configuration |
+| Parameter | Recorded value |
 |---|---|
 | GPU | NVIDIA Tesla T4 |
+| Inference server | vLLM `0.33.0` |
 | Model | `Qwen/Qwen3-0.6B` |
-| vLLM | `0.33.0` |
 | Precision | FP16 |
-| Temperature | `0.0` |
-| Prompt length | 377 tokens |
-| Output limit | 24 generated tokens per request |
-| Runs | Three sequential requests per cache configuration |
+| Temperature | `0` |
+| Request count | 3 |
+| Generated tokens | 24 per request |
+| Prefix caching | Enabled |
 
-| Request | Prefix cache OFF | Prefix cache ON |
+### Observed repeatability and cache reuse
+
+| Request | Prefix-cache query tokens | Cache-hit tokens |
 |---|---:|---:|
-| 1 (cold) | 0 / 377 tokens cached | 0 / 377 tokens cached |
-| 2 (warm) | 0 / 377 tokens cached | **368 / 377** tokens cached |
-| 3 (warm) | 0 / 377 tokens cached | **368 / 377** tokens cached |
+| 1 (cold) | 563 | 0 |
+| 2 (warm) | 563 | 560 |
+| 3 (warm) | 563 | 560 |
+| **Total** | **1,689** | **1,120** |
 
-**Observed findings:**
+All three calls completed and returned **identical generated token-ID sequences**: zero mismatches. The recorded aggregate prefix-cache token-hit ratio was **66.31%**. These are Prometheus counter-derived observations, **not** measurements of latency improvements or cost savings.
 
-- Prefix caching was genuinely exercised: both cache-enabled warm requests reported 368 cached prompt tokens.
-- All three cache-disabled requests produced identical generated token IDs.
-- All three cache-enabled requests produced identical generated token IDs.
-- Token-ID sequences were identical across both configurations.
-- The original observations, experiment script, and comparison report passed offline evidence-verification tests.
+The experiment report describes setup, managed server lifecycle, source evidence, validation, diagnostics, and limitations. The recorded counters were independently checked for internal consistency; raw before-and-after Prometheus metric snapshots were not retained.
 
-The experiment established **output consistency alongside measured cache reuse on the tested T4 configuration**. It did not reproduce the reported H100 divergence and therefore does not establish whether that upstream failure is fixed.
+**Primary evidence:** [vLLM 0.33.0 / Tesla T4 experiment report](experiments/vllm_cache_observability_t4/T4_EXPERIMENT_REPORT.md).
 
-**Evidence:** [Tesla T4 experiment, method, raw observations, and validation](experiments/t4_qwen3_0_6b/README.md).
+**Earlier case study:** [Tesla T4 cache-enabled and cache-disabled comparison](experiments/t4_qwen3_0_6b/README.md) documents a distinct controlled experiment, including cache-on/cache-off output comparison. Do not conflate the measurements from these separate runs.
 
-## Engineering Progress and Next Integrations
+### Relation to the upstream vLLM issue
 
-| Engineering area | Achieved | Next integration |
-|---|---|---|
-| Differential comparison | Token and log-probability checks with metadata validation | Additional supported evidence types |
-| Repeated HTTP inference | Live sequential text acquisition and comparison | Server-specific genuine token-ID acquisition |
-| Token-level checks | Tested token-ID comparator and CLI mode | End-to-end vLLM HTTP token verification |
-| Prefix-cache investigation | Measured real cache reuse and compared six GPU observations | Automated cache-ON/OFF server configuration workflows |
-| Reports | JSON and offline HTML evidence | Broader CI-oriented reporting and workflows |
-| Verification | Automated tests, CI checks, preserved experiment evidence | Historical regression cases and cross-backend coverage |
-| Provenance | Prompt fingerprints and recorded configuration metadata | Stronger evidence provenance and optional signing |
+[vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896) describes first-request versus repeated-request differences in a different environment. InferenceGuard supplies checks relevant to detecting such divergence, including first-response baselines, token-ID comparison, and cache observation. **The T4 results did not reproduce or resolve the upstream issue**, which involved an NVIDIA H100 environment. The T4 result is evidence for the configuration tested, not a claim of determinism across hardware or vLLM releases.
 
-### The specific bridge to live token-level verification
+## Reproducible customer demonstrations (P5.2)
 
-The remaining integration requirement is **observability through the serving API**, not a new token comparison algorithm. Generated token IDs must be returned by the inference server and correctly requested, parsed, validated, and passed to InferenceGuard.
+Three local scenarios send actual HTTP requests to a **simulated** completion server and exercise the real InferenceGuard CLI. **These scripts do not execute a language model; their token IDs are simulated.** They complement, but do not replace, the real-GPU evidence above.
 
-An initial integration can target vLLM's supported token-ID response extension while keeping the default OpenAI-compatible text workflow unchanged. A compatible server can then supply real token observations to the existing repeatability engine. Other servers will require explicit capability checks rather than assumptions that all OpenAI-compatible APIs expose the same extensions.
+| Demonstration | Expected inference verdict | Additional observation | Exit |
+|---|---|---|---:|
+| Healthy inference | `PASS` | Three matching simulated token-ID sequences | `0` |
+| Injected token regression | `FAIL` | One changed token ID in response 2, despite unchanged text; mismatch index `[1]` | `1` |
+| Unavailable cache metrics | `PASS` | Cache status `UNAVAILABLE`, explicit errors and null deltas | `0` |
 
-Automated cache-configuration comparisons additionally require controlled server settings and recorded run metadata so that results remain meaningful.
+Run from the repository root:
 
-## Quality and Reproducibility
+```bash
+python -m demos.customer_demo.healthy_demo \
+  --output /tmp/inferenceguard_healthy_demo.json
 
-Development follows incremental feature branches, pull requests, automated pytest coverage, Ruff lint/format checks, GitHub Actions CI, package-build verification, and dependency auditing.
+python -m demos.customer_demo.regression_demo \
+  --output /tmp/inferenceguard_regression_demo.json
 
-At the documented milestone, **55 automated tests passed locally**. The test suite includes repeatability scenarios, token-level comparisons, HTTP mock-server checks, CLI behavior, and offline verification of preserved Tesla T4 experimental evidence.
+python -m demos.customer_demo.metrics_unavailable_demo \
+  --output /tmp/inferenceguard_metrics_unavailable.json
+```
 
-The project uses a deliberately scoped verification contract:
+The regression example **intentionally exits with code 1**. For prerequisites, expected reports, verification commands, and limitations, see the [Customer Demonstration Guide](demos/customer_demo/README.md).
 
-- Temperature zero is a useful controlled setting, but does not universally guarantee identical outputs across serving environments.
-- Stochastic generation needs an appropriately designed statistical verification policy; exact token identity can be unsuitable as an unconditional release gate.
-- Model outputs are compared against specified invariants rather than judged for semantic correctness.
-- Prompt hashes and case IDs assist alignment and provenance, but are not cryptographic attestations.
-- GPU experiment results describe the recorded hardware, model, and software configuration, not every possible deployment.
+## Verification and development
+
+As of the merged P5.2 milestone, **170 automated tests passed**, along with `ruff check .` and `ruff format --check .`. Development uses feature branches, pull requests, protected `main`, GitHub Actions, and incremental test-driven verification.
+
+```bash
+python -m ruff check .
+python -m ruff format --check .
+python -m pytest -q
+python -m build
+```
+
+## Scope and limitations
+
+- Exact matching at temperature zero is useful evidence but does not guarantee universal determinism.
+- Token-level verification depends on a compatible backend returning genuine generated token IDs.
+- Missing prefix-cache metrics are reported separately and cannot be treated as measured zero reuse.
+- Cache-hit ratios alone do not establish speedups or economic savings.
+- Real-GPU findings cover the reported hardware, model, software, and three-request workload only.
+- High-concurrency, distributed-serving, and cross-GPU determinism have not been established by these demonstrations.
+- InferenceGuard detects and reports observations; it does not modify vLLM's caching algorithms or kernels.
 
 ## Documentation
 
 - [Architecture and specification](docs/architecture.md)
-- [GitHub repository governance](docs/github-governance.md)
 - [Threat model and verification boundaries](docs/threat-model.md)
-- [NVIDIA Tesla T4 experimental evidence](experiments/t4_qwen3_0_6b/README.md)
-- [Related upstream vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896)
+- [GitHub repository governance](docs/github-governance.md)
+- [Managed-server NVIDIA Tesla T4 experiment](experiments/vllm_cache_observability_t4/T4_EXPERIMENT_REPORT.md)
+- [Earlier Tesla T4 experiment](experiments/t4_qwen3_0_6b/README.md)
+- [Customer demonstrations](demos/customer_demo/README.md)
+- [Related vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896)
 
 ## License
 
 MIT License.
 
-**InferenceGuard is built to turn inference-output differences into measurable, repeatable, machine-checkable engineering evidence.**
+**InferenceGuard turns inference-output differences into measurable, repeatable, machine-checkable engineering evidence.**
