@@ -425,3 +425,110 @@ def test_execute_inferenceguard_rejects_invalid_evidence(monkeypatch, tmp_path):
 
     with pytest.raises(RuntimeError):
         run_experiment.execute_inferenceguard("/usr/bin/python3", report_path)
+
+
+def test_controlled_experiment_runs_all_stages(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    server = MagicMock()
+    calls = []
+
+    @contextmanager
+    def fake_server(command, log_path):
+        assert "--enable-prefix-caching" in command
+        assert log_path == tmp_path / "server.log"
+        calls.append("start")
+        try:
+            yield server
+        finally:
+            calls.append("stop")
+
+    def fake_preflight(process):
+        assert process is server
+        calls.append("preflight")
+        return {"queries": 100, "hits": 40}
+
+    def fake_execute(python_executable, report_path):
+        assert python_executable == "/usr/bin/python3"
+        assert report_path == tmp_path / "repeatability.json"
+        calls.append("inference")
+        return {"verdict": "PASS", "cache_status": "AVAILABLE"}
+
+    monkeypatch.setattr(run_experiment, "managed_vllm_server", fake_server)
+    monkeypatch.setattr(run_experiment, "prepare_server_for_inference", fake_preflight)
+    monkeypatch.setattr(run_experiment, "execute_inferenceguard", fake_execute)
+
+    result = run_experiment.run_controlled_experiment("/usr/bin/vllm", "/usr/bin/python3", tmp_path)
+
+    assert result["verdict"] == "PASS"
+    assert calls == ["start", "preflight", "inference", "stop"]
+
+
+def test_controlled_experiment_stops_on_preflight_failure(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    calls = []
+
+    @contextmanager
+    def fake_server(command, log_path):
+        calls.append("start")
+        try:
+            yield MagicMock()
+        finally:
+            calls.append("stop")
+
+    def failing_preflight(process):
+        calls.append("preflight")
+        raise RuntimeError("Metrics preflight failed")
+
+    execute = MagicMock()
+
+    monkeypatch.setattr(run_experiment, "managed_vllm_server", fake_server)
+    monkeypatch.setattr(run_experiment, "prepare_server_for_inference", failing_preflight)
+    monkeypatch.setattr(run_experiment, "execute_inferenceguard", execute)
+
+    with pytest.raises(RuntimeError, match="Metrics preflight failed"):
+        run_experiment.run_controlled_experiment("/usr/bin/vllm", "/usr/bin/python3", tmp_path)
+
+    assert calls == ["start", "preflight", "stop"]
+    execute.assert_not_called()
+
+
+def test_controlled_experiment_stops_on_inference_failure(monkeypatch, tmp_path):
+    from contextlib import contextmanager
+    from unittest.mock import MagicMock
+
+    from experiments.vllm_cache_observability_t4 import run_experiment
+
+    calls = []
+
+    @contextmanager
+    def fake_server(command, log_path):
+        calls.append("start")
+        try:
+            yield MagicMock()
+        finally:
+            calls.append("stop")
+
+    def fake_preflight(process):
+        calls.append("preflight")
+        return {"queries": 100, "hits": 40}
+
+    def failing_execute(python_executable, report_path):
+        calls.append("inference")
+        raise RuntimeError("Invalid inference evidence")
+
+    monkeypatch.setattr(run_experiment, "managed_vllm_server", fake_server)
+    monkeypatch.setattr(run_experiment, "prepare_server_for_inference", fake_preflight)
+    monkeypatch.setattr(run_experiment, "execute_inferenceguard", failing_execute)
+
+    with pytest.raises(RuntimeError, match="Invalid inference evidence"):
+        run_experiment.run_controlled_experiment("/usr/bin/vllm", "/usr/bin/python3", tmp_path)
+
+    assert calls == ["start", "preflight", "inference", "stop"]

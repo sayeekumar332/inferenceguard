@@ -261,3 +261,30 @@ def execute_inferenceguard(
         raise RuntimeError("Invalid InferenceGuard JSON report") from exc
 
     return validate_cache_report(report, result.returncode)
+
+
+def run_controlled_experiment(
+    vllm_executable: str,
+    python_executable: str,
+    output_dir: Path,
+) -> dict:
+    """Run a controlled vLLM experiment with guaranteed server cleanup."""
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    server_command = build_server_command(vllm_executable)
+    server_log = output_dir / "server.log"
+    report_path = output_dir / "repeatability.json"
+
+    with managed_vllm_server(server_command, server_log) as process:
+        # Inference must not begin until health and metrics checks pass.
+        prepare_server_for_inference(process)
+
+        # This function also independently validates token and cache evidence.
+        result = execute_inferenceguard(
+            python_executable,
+            report_path,
+        )
+
+    # The context manager has already shut down the server here.
+    return result
