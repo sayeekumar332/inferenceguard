@@ -20,6 +20,10 @@ SIMULATED_TOKEN_IDS = [101, 205, 309, 412]
 class DemoHandler(BaseHTTPRequestHandler):
     """Minimal OpenAI-compatible completion endpoint."""
 
+    def response_token_ids(self) -> list[int]:
+        """Return simulated token IDs for this response."""
+        return SIMULATED_TOKEN_IDS
+
     def do_POST(self):
         if self.path != "/v1/completions":
             self.send_error(404)
@@ -41,7 +45,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                         "index": 0,
                         "text": "Inference is repeatable.",
                         "finish_reason": "stop",
-                        "token_ids": SIMULATED_TOKEN_IDS,
+                        "token_ids": self.response_token_ids(),
                     }
                 ],
             }
@@ -61,10 +65,14 @@ class DemoHandler(BaseHTTPRequestHandler):
         """Suppress HTTP server console logging."""
 
 
-def run_demo(output: Path) -> int:
+def run_demo(
+    output: Path,
+    *,
+    handler_class: type[BaseHTTPRequestHandler] = DemoHandler,
+) -> int:
     """Run the existing InferenceGuard CLI against a local demo server."""
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), DemoHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_class)
 
     thread = threading.Thread(
         target=server.serve_forever,
