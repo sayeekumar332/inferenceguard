@@ -1,69 +1,64 @@
 # InferenceGuard — GitHub Governance and Development Evidence
 
-**Repository:** [sayeekumar332/inferenceguard](https://github.com/sayeekumar332/inferenceguard)
+**Repository:** [sayeekumar332/inferenceguard](https://github.com/sayeekumar332/inferenceguard) · **Current package:** `0.1.0a0`
 
-## 1. Governance objectives
+## 1. Objectives
 
-Maintain a traceable engineering history, enforce automated quality checks where the GitHub repository configuration permits, and preserve the experimental evidence and pull-request discussion supporting each milestone.
+Maintain a traceable engineering history, verified quality checks, protected integration branches, and reviewable experimental evidence. Separate what is **configured** from what is **confirmed by an actual GitHub check or PR**.
 
-## 2. Branching and integration policy
+## 2. Branch and pull-request policy
 
-- `main` is the integrated, tested development baseline.
-- Use descriptive topic branches such as `feat/*`, `fix/*`, `docs/*`, and `test/*`.
-- Submit changes through pull requests with a clear description, test evidence, scope, and limitations specific to the change.
-- Prefer squash merging after required checks pass; preserve the original topic branch and its commits as supplementary development history.
-- **Do not automatically delete merged feature branches.** Original branch commits and pull requests are retained as reviewable process evidence; experimental JSON and scripts committed to `main` are the principal result evidence.
-- Retain local branches unless intentionally removed; `git fetch --prune` only prunes remote-tracking references for branches already deleted on the remote.
-- Protect `main` from direct pushes, force pushes, and deletion where repository rules and access rights permit.
+- `main` is the integrated development baseline; submit changes through `feat/*`, `fix/*`, `docs/*`, and `test/*` branches.
+- Use PR descriptions to identify the problem, delivered changes, evidence, and boundaries.
+- Require appropriate automated checks and review before merging, according to the repository's effective branch rules.
+- Avoid direct or force pushes to protected `main`.
+- Prefer squash merging when appropriate and retain reviewable PR discussion and original experiment evidence. Do not automatically delete merged topic branches solely to improve appearance.
+- GitHub App and automation permissions should follow least privilege; connected-app write access does not imply permission to bypass branch protection.
 
-## 3. Repository controls and verification checklist
+## 3. Quality gate
 
-The following are desired or previously configured practices; confirm the live repository settings and effective enforcement before describing a particular control as active.
-
-- Verify default branch is `main` and the branch ruleset applies to it.
-- Require pull requests and relevant CI status checks before merging.
-- Check status names against actual workflow runs (for example, the Python-version test/lint matrix and dependency audit); do not assume names before seeing results.
-- Require conversation resolution where supported.
-- Use least-privilege GitHub Actions permissions, with read-only defaults unless a workflow needs scoped write access.
-- Enable Dependabot updates, secret scanning, and push protection where available; verify actual availability and settings.
-- Require an independent reviewer when available; self-approval is not independent review.
-- Verify the effective rules using repository settings and actual PR behavior rather than relying on a checklist alone.
-
-GitHub plan, repository visibility, and permissions can affect which branch protections or advanced security features are enforced. Record any exceptions accurately.
-
-## 4. CI and local quality gates
-
-Before proposing a PR, run:
+From the repository root:
 
 ```bash
 python -m ruff check .
 python -m ruff format --check .
 python -m pytest -q
+python -m build
 git diff --check
 ```
 
-Where relevant, run package-build and dependency-audit workflows and check the exact PR CI outcomes in GitHub. The recorded baseline after token-ID comparison PR #7 was **55 passing local tests**; counts will grow as new tests are added.
+The **merged P5.2 milestone** was verified locally with **170 passing tests**, Ruff checks, and a protected-branch PR workflow. Test counts are snapshots: always use the relevant branch's latest CI results for new changes, rather than assuming the same count indefinitely.
 
-## 5. PR documentation contract
+Confirm the actual workflow names, required check contexts, review requirements, secret scanning and dependency-audit settings in GitHub before making claims about their enforcement. Some controls depend on GitHub plan and repository settings; an owner's self-review is not an independent review.
 
-A PR description should state:
+## 4. PR evidence standard
 
-1. **Problem:** the user-facing or engineering problem it addresses.
-2. **Delivered:** behavior or documentation actually changed by this PR.
-3. **Evidence:** tests, recorded observations, and links to supporting artifacts.
-4. **Integration boundary:** the next specific requirement if broader hardware, protocol, or backend coverage is sought.
+Each PR should specify:
 
-A documentation-only PR must not claim it added functionality already implemented in earlier PRs. Link motivating issues, including [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896), while distinguishing detection/observability work from a fix to upstream vLLM internals.
+1. Problem statement and affected behavior.
+2. Concrete files and functionality changed.
+3. Tests/CI outcomes and links to reproduced evidence.
+4. Compatibility, limitations and remaining work.
 
-## 6. Experimental evidence retention
+A documentation-only PR must not claim to implement features already delivered. PR #17 updates the top-level README with the integrated GPU and P5.2 evidence; the `docs/` refresh is a separate documentation change.
 
-- Commit reusable experiment scripts, clearly labeled original JSON reports, comparison logic, and interpretive documentation.
-- Record hardware, model, inference engine, available version/revision information, sampling settings, and measurement method.
-- Prefer small CPU-only verification tests of captured evidence so CI does not require GPUs.
-- Keep original experimental observations unchanged; create new files for subsequent runs.
-- Remove credentials, private prompts, sensitive metadata, and other secrets before public publication.
-- Describe Tesla T4 results as T4 results; they do not substitute for a matched NVIDIA H100 reproduction.
+## 5. Experiment evidence retention
 
-## 7. Release and product communications
+- Preserve original scripts, environment/configuration metadata, observations and report files for each distinct experiment.
+- Do not edit archived evidence to make a newer result look like the original.
+- Record model, vLLM version, GPU, precision, sampling, token-capture method, and relevant cache settings.
+- Keep CPU-runnable evidence consistency tests in CI where practical, without requiring GPU access.
+- Review prompts, tokens, paths, logs and environment files for secrets or sensitive data before publication.
+- Distinguish the older T4 cache-ON/OFF study from the newer vLLM 0.33.0 managed-server study; neither reproduces the referenced H100 issue.
 
-Use the actual package version from `pyproject.toml` (currently `0.1.0a0`). Keep product language capability-led and evidence-based: distinguish functionality demonstrated by tests, real hardware experiments, and future integrations. Passing CI and finite experiments support specific engineering claims; they do not serve as independent certification of model correctness.
+Evidence for the newer study is in [the Tesla T4 report](../experiments/vllm_cache_observability_t4/T4_EXPERIMENT_REPORT.md). Customer-facing simulated cases are documented in [the demonstration guide](../demos/customer_demo/README.md).
+
+## 6. Release and external claims
+
+Use the package version in `pyproject.toml`; it is currently an alpha release, `0.1.0a0`.
+
+- Report **170 passing tests** specifically as the P5.2 recorded milestone, not a permanent invariant.
+- Describe the real T4 experiment as three matching generated token-ID sequences and 1,120 recorded prefix-cache-hit tokens under its tested setup.
+- Describe local customer demos as **simulated HTTP responses**, not real LLM runs.
+- Do not equate cache-hit ratios with measured cost or latency reductions.
+- No test suite or small hardware experiment independently certifies model correctness, end-to-end security, or cross-platform determinism.

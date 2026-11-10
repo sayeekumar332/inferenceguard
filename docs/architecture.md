@@ -1,99 +1,139 @@
 # InferenceGuard — Architecture and Verification Specification
 
-**Version:** 0.1.0a0 · **Project focus:** evidence-based AI inference regression detection
+**Version:** `0.1.0a0` · **Scope:** evidence-based AI inference regression detection · **Milestone:** P5.2 (170 passing tests)
 
-## 1. Engineering problem
+## 1. Engineering objective and verification boundaries
 
-Inference-serving changes can introduce observable differences between a baseline and a candidate run, or between repeated identical requests. InferenceGuard makes selected differences measurable and reviewable through strict comparison rules, explicit verdicts, and persisted reports.
+InferenceGuard detects observable differences between reference and candidate inference evidence, and between repeated requests sent to the same inference endpoint. It produces explicit verdicts and machine-readable reports. It is designed for **regression detection and observability**, not a guarantee of semantic correctness, universal numerical determinism, or a change to vLLM internals.
 
-The project is motivated in part by [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896), which describes first-request versus subsequent-request divergence with prefix caching enabled at temperature zero. InferenceGuard addresses regression **detection and evidence collection**; the upstream issue is separate from any fix to vLLM internals.
+The related [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896) illustrates the type of first-request/warm-request divergence that motivates the tool. InferenceGuard has **not** reproduced or fixed that issue.
 
-## 2. Implemented workflows
+## 2. Implemented verification workflows
 
-### 2.1 Offline differential verification (`inferenceguard compare`)
+### 2.1 Offline differential verification: `inferenceguard compare`
 
-`reference.json` + `candidate.json` → `core.load_run` / `core.validate_run` → `core.compare_runs` → JSON report and optional escaped HTML report.
+`reference.json` + `candidate.json` → `core.load_run` and validation → `core.compare_runs` → JSON report (optional HTML).
 
-- Validates versioned input schema, numeric constraints, case identifiers, prompt fingerprints, model/tokenizer IDs and revisions, and sampling metadata.
-- Checks token-ID equality under the default policy and optional per-token log-probabilities within a configurable absolute tolerance.
-- Returns `PASS`, `FAIL`, or `INCOMPATIBLE`. Invalid input is reported as an execution/validation error (exit code 2).
-- Adds SHA-256 canonical content digests to the CLI report as useful local fingerprints, not producer authentication.
+- Validates versioned schema, numeric constraints, case IDs, prompt fingerprints, model/tokenizer identifiers and revisions, and sampling metadata.
+- Checks generated token-ID equality and optional aligned per-token log-probabilities with a configurable absolute tolerance.
+- Returns `PASS`, `FAIL`, or `INCOMPATIBLE`; invalid inputs yield exit code 2.
+- Reports canonical SHA-256 content fingerprints, which detect content changes but do not authenticate the collector.
+- Escapes externally provided values in HTML.
 
-### 2.2 HTTP repeated-request verification (`inferenceguard repeat`)
+### 2.2 Repeated HTTP verification: `inferenceguard repeat`
 
-User-supplied `/v1/completions` endpoint → `HttpInferenceClient.generate` → `InferenceObservation` → `run_repeatability` → JSON report.
+User-configured `/v1/completions` endpoint → `HttpInferenceClient.generate` → `InferenceObservation` → `run_repeatability` → JSON report.
 
-- Sends identical sequential HTTP POST requests to an OpenAI-compatible completion endpoint, with temperature 0 and nonstreaming completion requests.
+- Issues sequential non-streaming requests using temperature 0.
 - Supports `--comparison-mode text` (default) and `--comparison-mode tokens`.
-- Compares successful responses against the first response; mismatch indices are zero-based.
-- Returns `PASS`, `FAIL`, or `INCONCLUSIVE` when required observations are missing or a request fails.
-- `InferenceObservation` carries `text`, `finish_reason`, and optional original `token_ids`.
-- **Live acquisition boundary:** the current HTTP client extracts text and finish reason but does not request or parse token IDs from server-specific extensions. Therefore token-mode requests through this adapter are `INCONCLUSIVE` when IDs are absent. Token-mode comparison logic has been tested with synthetic token-capable clients.
-- HTTP repeat reports are JSON; HTML report generation currently belongs to the offline `compare` workflow.
+- In **token mode**, sends `return_token_ids: true`, validates genuine nonnegative integer token IDs in the `choices[0].token_ids` response field, and compares sequences against the first completed response. The capability depends on server compatibility.
+- Does **not** infer missing token IDs by retokenizing response text. Missing token observations produce `INCONCLUSIVE`.
+- Reports zero-based request mismatch indices. Transport, invalid-response, or required-evidence failures can result in `INCONCLUSIVE`.
+- Emits JSON for HTTP runs; HTML output remains specific to offline `compare`.
 
-## 3. Principal modules
+### 2.3 Optional prefix-cache observation: `--observe-prefix-cache`
 
-| Module | Responsibility |
+`HttpInferenceClient` → `CacheObservedClient` → requests plus snapshots from `prefix_cache_metrics.fetch_prefix_cache_metrics` → `cache_observability` report section.
+
+- Reads vLLM Prometheus counters `vllm:prefix_cache_queries` and `vllm:prefix_cache_hits` (including supported `_total` forms).
+- Attempts an initial metric snapshot, then a post-request snapshot for each completed request; computes interval query/hit deltas and hit-rate fractions.
+- Enforces nonnegative integral counters, rejects duplicate or malformed series, and records invalid intervals/counter resets.
+- Sets observation status to `AVAILABLE`, `PARTIAL`, or `UNAVAILABLE`, including per-request `deltas`, `errors`, and `initial_error`.
+- Missing metrics are represented by `null`, not zero. Cache status is **independent of the inference verdict**.
+- Counters may be server-wide: isolated workloads are necessary for defensible per-request attribution.
+
+## 3. Principal implementation components
+
+| Component | Responsibility |
 |---|---|
-| `core.py` | Strict offline schema validation, comparison policy, canonical content digest |
-| `http_client.py` | Bounded HTTP completion client, response validation, observation structure |
-| `repeatability.py` | Sequential repeat requests, text/token comparison, mismatch and inconclusive results |
-| `cli.py` | `compare`/`repeat` commands, exit-code mapping, JSON and offline HTML output |
-| `tests/` | Unit, mock-HTTP, CLI, security-focused, repeatability, and experimental evidence checks |
-| `experiments/t4_qwen3_0_6b/` | Standalone real-GPU experiment script, recorded data, comparison and methodology |
+| `src/inferenceguard/core.py` | Offline schema validation, compatibility, comparison policy, provenance digests |
+| `src/inferenceguard/http_client.py` | Bounded HTTP completion requests, optional token-ID request and strict response parsing |
+| `src/inferenceguard/repeatability.py` | Sequential repeated requests, text/token comparison, mismatch and inconclusive verdicts |
+| `src/inferenceguard/prefix_cache_metrics.py` | Prometheus counter parsing, secure bounded metrics retrieval, delta calculation |
+| `src/inferenceguard/cache_observation.py` | Metrics snapshots around inference calls and independent observability errors |
+| `src/inferenceguard/cli.py` | CLI argument handling, orchestration, verdict/exit-code mapping, JSON and offline HTML |
+| `demos/customer_demo/` | Three HTTP-backed simulated demonstration scenarios |
+| `experiments/vllm_cache_observability_t4/` | Managed real-vLLM GPU experiment runner, report and archived JSON evidence |
+| `experiments/t4_qwen3_0_6b/` | Earlier separate GPU experiment with cache-enabled/cache-disabled comparisons |
+| `tests/` | Unit, integration-style mock HTTP, negative-path, demonstration and evidence tests |
+
+### Data flow
+
+```text
+             Offline reference/candidate files
+                           |
+                  validation + compare
+                           |
+                    evidence report
+
+/v1/completions -- HttpInferenceClient --> repeatability engine
+                        |                     |
+               optional CacheObservedClient  |
+                        |                     |
+                     /metrics                 |
+                        |                     |
+               cache observations --------> JSON report
+```
 
 ## 4. Offline input contract (`schema_version: "1.0"`)
 
-An offline run contains exactly `schema_version`, `metadata`, and `cases`.
+A run has exactly `schema_version`, `metadata`, and `cases`.
 
-- `metadata`: nonempty `model_id`, `model_revision`, `tokenizer_id`, `tokenizer_revision`, and nonempty `sampling` object.
-- Each case: unique `id`, nonempty `prompt_hash`, `tokens` (up to 8,192 nonnegative integer IDs), and `logprobs` (null or finite numeric values aligned with tokens).
-- Maximum case count: 10,000; maximum input file size: 8 MiB.
-- A prompt fingerprint is supplied by the collection workflow. Collectors should document how prompt bytes are normalized and hashed. InferenceGuard does not establish that a collector is authentic.
-- The offline T4 experimental JSON has a **separate experiment-specific format**; it is not automatically an input to `inferenceguard compare` without conversion to the versioned offline schema.
+- Metadata includes nonempty model/tokenizer identifiers and revisions, plus a nonempty sampling object.
+- Cases have unique IDs, nonempty prompt fingerprints, up to 8,192 nonnegative token IDs each, and optional finite aligned log-probabilities.
+- Limits: 10,000 cases and an 8 MiB input file.
+- Prompt normalization and hashing policy belong to the evidence collector; a prompt hash does not attest to the collector's trustworthiness.
+- Experiment-specific T4 JSON is **not** automatically compatible with the offline input schema without conversion.
 
-## 5. Verdict contracts
+## 5. Verdict and observability contracts
 
-| Workflow | Verdict | Exit | Interpretation |
+| Workflow | Outcome | Exit code | Meaning |
 |---|---|---:|---|
-| Offline `compare` | `PASS` | 0 | Selected invariants match |
-| Offline `compare` | `FAIL` | 1 | Selected invariant differs |
-| Offline `compare` | `INCOMPATIBLE` | 2 | Metadata/case sets do not support a defensible comparison |
-| HTTP `repeat` | `PASS` | 0 | Selected available comparison dimension is repeatable |
-| HTTP `repeat` | `FAIL` | 1 | Selected comparison dimension differs |
-| HTTP `repeat` | `INCONCLUSIVE` | 2 | Response failure or required token data unavailable |
-| Either | Input/operational error | 2 | Command could not complete a valid comparison |
+| Offline `compare` | `PASS` / `FAIL` / `INCOMPATIBLE` | 0 / 1 / 2 | Matching evidence / selected difference / incompatible run metadata |
+| HTTP `repeat` | `PASS` / `FAIL` / `INCONCLUSIVE` | 0 / 1 / 2 | Matching observations / divergence / insufficient evidence |
+| Either | Input or execution error | 2 | Verification could not be completed |
 
-A `PASS` is evidence about selected measurements, not proof of model semantic correctness or universal determinism.
+`cache_observability.status` is a **separate** report field, not a verdict that overrides `PASS` or `FAIL`. CI policies that require cache readings must enforce this separately.
 
-## 6. Real-GPU verification reference
+## 6. Real GPU experiments — separate, noninterchangeable evidence
 
-An independent vLLM Python API experiment ran on a free NVIDIA Tesla T4 with `Qwen/Qwen3-0.6B`, vLLM 0.33.0, FP16, temperature 0, and three sequential requests per prefix-cache configuration.
+### 6.1 Earlier cache ON/OFF Tesla T4 comparison
 
-| Request | Cache disabled | Cache enabled |
+The initial experiment used the vLLM Python API and Qwen3-0.6B on Tesla T4, observing 368/377 cached prompt tokens on two warm cache-enabled requests, with equal generated token-ID sequences in the recorded cache-on/cache-off trials. See [earlier experiment methodology](../experiments/t4_qwen3_0_6b/README.md).
+
+### 6.2 Newer managed-server Tesla T4 integration
+
+A separate controlled experiment ran **vLLM 0.33.0**, **Qwen/Qwen3-0.6B**, **FP16**, temperature 0, three calls, with prefix caching enabled.
+
+| Request | Query tokens | Cache-hit tokens |
 |---|---:|---:|
-| 1 | 0/377 | 0/377 |
-| 2 | 0/377 | 368/377 |
-| 3 | 0/377 | 368/377 |
+| Cold request | 563 | 0 |
+| Warm request 1 | 563 | 560 |
+| Warm request 2 | 563 | 560 |
+| **Totals** | **1,689** | **1,120** |
 
-All six recorded generated token-ID sequences matched. This demonstrates measured cache reuse and repeatability for the tested T4 configuration, not reproduction or remediation of the issue reported on NVIDIA H100. The exact model commit revision was not pinned. Consult [experiment methodology](../experiments/t4_qwen3_0_6b/README.md).
+All three requests completed and their generated **24-token ID sequences matched**. The aggregate cache-hit ratio from the recorded counters was **66.31%**. This is **not** a latency improvement measurement. Archived results passed independent internal consistency checks; raw before/after Prometheus samples were not saved. See [managed-server T4 experiment report](../experiments/vllm_cache_observability_t4/T4_EXPERIMENT_REPORT.md).
 
-Tesla T4 was selected because it was accessible via Google Colab Free and sufficient to exercise the small-model inference and actual prefix reuse at zero GPU expenditure. H100-specific behavior requires an appropriately matched H100 experiment.
+Neither T4 study reproduces the H100-specific report from vLLM issue #40896. The T4 runtime also recorded a FlashAttention 2 compatibility fallback and a shutdown semaphore warning, documented in the experiment report.
 
-## 7. Acceptance criteria and demonstrated testing
+## 7. Automated tests and customer demos
 
-- Identical offline runs pass; injected token or log-probability mismatches fail.
-- Incompatible model/tokenizer/sampling metadata and case sets produce `INCOMPATIBLE`.
-- Malformed and oversized offline evidence is rejected; HTML escapes supplied values.
-- HTTP repeated text matches pass; first-versus-warm mismatch scenarios fail with identified indices; transport failures are inconclusive.
-- Token-ID equality/difference, missing IDs, and CLI report compatibility are covered by synthetic tests.
-- T4 JSON observations and the comparison report are checked offline.
-- Recorded project checkpoint: **55 local tests passing** with Ruff checks; use current CI runs as authoritative evidence of branch-specific checks.
+Following P5.2, **170 tests passed**, with Ruff lint and formatting checks clean. Three CPU-runnable local HTTP demonstrations exercise the InferenceGuard CLI with **simulated** token IDs:
 
-## 8. Next integration boundary
+1. Healthy repeated responses → inference `PASS`.
+2. A deliberately changed token ID in response 2 → inference `FAIL`, index `[1]`, even though response text stays unchanged.
+3. Unavailable `/metrics` → inference `PASS`, cache observability `UNAVAILABLE`, null deltas and explicit errors.
 
-**Live vLLM token-ID acquisition:** opt-in request for a vLLM-supported token-ID response extension, strict parsing of actual returned token IDs, correct handling of absent/unsupported data, and mock-server tests. Real vLLM HTTP integration may be verified in a single resource-limited Tesla T4 session if free access is available.
+These are controlled simulated cases, **not real model inference**. See [customer demo guide](../demos/customer_demo/README.md).
 
-**Automated cache-ON/OFF orchestration:** compare independently controlled server configurations with documented model revision, tokenizer, sampling, hardware, cache status, and effective kernel/backend settings. Do not equate enabling prefix caching with observed cache reuse.
+## 8. Current integration boundaries and next research
 
-**Future verification research:** concurrency perturbation, statistical evaluation for stochastic sampling, false-positive characterization, and stronger evidence provenance. These are separate milestones from the implemented comparison engine.
+Implemented capabilities include real HTTP token-ID acquisition, opt-in metrics observation, a managed-server GPU experiment, and reproducible simulated failure demonstrations. Future work includes:
+
+- Broader model/backend compatibility tests and explicit capability negotiation.
+- Controlled comparisons of independently configured cache ON/OFF **HTTP servers**.
+- High-concurrency/distributed workload evaluation and robust per-request metrics attribution.
+- Stochastic-output statistical policies and false-positive characterization.
+- Stronger provenance, authenticated evidence, and operational hardening.
+
+Validate each expansion with new targeted tests and representative runtime evidence before claiming support.

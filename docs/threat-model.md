@@ -1,67 +1,90 @@
 # InferenceGuard — Threat Model and Evidence Integrity
 
-**Scope:** offline differential verification, HTTP inference repeatability, JSON/HTML reporting, and published experiment evidence.
+**Scope:** offline differential comparison, live HTTP completion repeatability, optional prefix-cache metrics retrieval, JSON/HTML reporting, GPU experiments and simulated customer demonstrations.
 
 ## 1. Security and reliability objectives
 
-Protect the trustworthiness of comparison results and prevent untrusted inputs, network endpoints, or published evidence from misleading users or compromising the environment running the CLI.
+Protect the integrity of reported comparison outcomes and reduce the risk that untrusted data, network endpoints, or published evidence mislead users or compromise the environment running the CLI.
+
+Verification claims must match the **specific data available** and must not turn unobserved metrics into fabricated measurements.
 
 ## 2. Assets
 
-- Comparison verdicts, mismatch indices, input policies, and generated reports.
-- Model, tokenizer, sampling, prompt fingerprint, and hardware metadata used to interpret observations.
-- Captured generated text, token IDs, log-probabilities, and experiment files.
-- CI credentials, user workstation/network access, and inference endpoints used by `repeat`.
+- Comparison verdicts, mismatch indices, cache-status indicators, per-request metric deltas, and generated reports.
+- Model/tokenizer/sampling, hardware and execution configuration metadata.
+- Prompt fingerprints, generated text, authentic token IDs, log-probabilities and experiment files.
+- Workstation network reachability, CI secrets, inference-server endpoints and monitoring interfaces.
 
 ## 3. Trust boundaries
 
-### Offline inputs and provenance
+### 3.1 Offline files and evidence producers
 
-User-supplied JSON and collector-produced metadata are untrusted. The `compare` workflow validates structure, values, sizes, and cross-run compatibility. SHA-256 content fingerprints can reveal changed bytes, but do **not** authenticate an artifact producer or establish truthful collection. Prompt fingerprints and case IDs are not attestations.
+Offline evidence is untrusted. `compare` validates a versioned schema, bounded sizes, numeric values, case alignment and model/tokenizer compatibility. Canonical SHA-256 digests support content comparison but **do not authenticate** the collector or establish that its metadata is truthful.
 
-### HTTP inference endpoint
+The T4 experiment's archived JSON uses a different evidence format from offline `schema_version: "1.0"` comparison input.
 
-The `repeat` command makes outbound requests to a user-supplied HTTP(S) `/v1/completions` URL. The client validates the endpoint URL form, rejects embedded credentials and URL query/fragment components, uses a finite positive request timeout, and bounds the bytes read from the response. Responses are untrusted and require validation before conversion to observations.
+### 3.2 HTTP completion requests and token-ID extensions
 
-**Network-access consideration:** a URL supplied by an untrusted user can target reachable internal or local services. Path and scheme validation alone are not SSRF prevention; deployment environments should restrict destinations appropriately. Plain HTTP provides no transport encryption. TLS server authentication depends on a correctly configured HTTPS environment; it is not a substitute for endpoint authorization policy.
+The HTTP client accepts configured HTTP(S) URLs targeting `/v1/completions`, disallows embedded credentials, queries and fragments, and applies timeout and response-size bounds. It validates the returned completion structure.
 
-### Output and publication
+In token mode the adapter sets `return_token_ids: true` and validates `choices[0].token_ids` as nonnegative integers. It does not reconstruct IDs by retokenizing text. **Missing token IDs yield inconclusive token evidence**, not a token-level PASS.
 
-Machine-readable JSON and human-readable HTML reports can contain sensitive generated content or identifying experiment metadata. HTML report text must remain escaped. GitHub publication of experimental data requires review for secrets and private prompts.
+**SSRF exposure:** URL structure checks do not prevent a malicious or mistaken endpoint from pointing to a reachable internal resource. Isolate runners, restrict allowed destinations, and use only trusted servers. HTTP carries no transport encryption; HTTPS certificate validation does not itself authorize the destination.
+
+The client does not currently provide a managed credential store, configurable authenticated headers, or comprehensive network isolation.
+
+### 3.3 Prefix-cache metrics
+
+Opt-in monitoring also makes requests to `/metrics` at the server origin. This introduces an additional network-read and input-parsing surface.
+
+Implemented mitigations include bounded 1 MiB response reads, finite timeouts, redirect rejection, HTTP(S) base URL validation and strict counter parsing. The metrics collector rejects missing or ambiguous counter series, malformed values, negative deltas and reset/invalid intervals.
+
+Cache values may be **server-wide**. Per-request interval changes can include unrelated traffic unless the environment is isolated. Metrics failures are recorded as unavailable, independently of inference `PASS`/`FAIL`.
+
+### 3.4 Reports, demos and published evidence
+
+JSON/HTML reports and archived observations may expose model responses, prompt content or identifying environmental details. The offline HTML renderer escapes externally provided text, but publication still requires a deliberate secrets/privacy review.
+
+The three P5.2 customer demonstrations return **simulated** responses and token IDs. Claims about those demos must not imply the IDs came from an actual model. Their role is reproducible positive and negative-path testing.
 
 ## 4. Implemented safeguards
 
-- Strict versioned offline schema with constraints on file size, case count, token lengths, numeric finiteness and metadata fields.
-- Explicit comparison compatibility and evidence-limited verdicts.
-- HTML escaping of externally supplied case identifiers and reasons.
-- HTTP(S) URL structure checks and rejection of URL userinfo, query and fragment; timeout and response-size limits.
-- Validation of the expected completion response shape before accepting text observations.
-- Separation of unavailable token evidence (`INCONCLUSIVE`) from successful token verification (`PASS`).
-- Minimal runtime dependencies and automated regression tests for key negative cases.
+- Strict bounded offline schema validation and compatibility rules.
+- Finite HTTP timeouts, bounded response reads, endpoint structure checks and completion response validation.
+- Explicit opt-in request for genuine server-generated token IDs.
+- `INCONCLUSIVE` for missing required token observations rather than fabricated IDs.
+- Independent cache observability `AVAILABLE` / `PARTIAL` / `UNAVAILABLE` statuses, null missing intervals and categorized errors.
+- Validated cache-counter deltas, malformed-series rejection and rejected metrics redirects.
+- HTML escaping for human-readable offline reports.
+- Automated positive and negative-path tests, protected-branch PR workflow, lint/format checks.
 
-The current HTTP adapter accepts HTTP as well as HTTPS and does not provide a built-in server allowlist, authentication credential management, or comprehensive endpoint isolation. These are integration and deployment considerations rather than controls already provided.
+## 5. Remaining risks and candidate controls
 
-## 5. Risks and next engineering controls
-
-| Risk or requirement | Current approach / next control |
+| Risk | Current boundary / proposed improvement |
 |---|---|
-| Malicious or private-network URL | Validate configured server destinations; add opt-in hostname/IP policy and documented deployment restrictions where appropriate |
-| Sensitive prompts and outputs | Redaction/retention rules and explicit publication review |
-| Collector falsification | Authenticated or signed manifests and trusted collector provenance in future work |
-| Unsupported token-ID extensions | Strictly validate genuine server-generated token-ID arrays; return `INCONCLUSIVE` if missing rather than reconstructing IDs from text |
-| Credential exposure | Dedicated secret handling and headers only after defining an authenticated-endpoint security design |
-| Backend drift | Pin model revisions and record effective serving, tokenizer, sampler, kernel, and cache configuration |
-| Response / resource exhaustion | Continue bounded parsing; consider retry policy, rate limiting, and resource controls for expanded workflows |
-| Supply chain and CI | Continue dependency auditing; evaluate GitHub Actions SHA pinning and an SBOM when appropriate |
-| Overconfident verification verdicts | Report exact supported invariants, test conditions and evidence coverage |
-| Broader statistical behavior | Design stochastic sampling and false-positive tests before using token identity as a general release criterion |
+| Private-network SSRF or unauthorized server access | Run with explicit network restrictions; future destination allowlisting |
+| Sensitive prompts, outputs, metrics or logs | Data-minimization/redaction rules, controlled artifact retention and publication review |
+| Untrusted evidence provenance | Future signed/verified producer manifests; content hashes alone are insufficient |
+| Unsupported token-ID extensions | Explicit backend capability detection and robust cross-backend compatibility tests |
+| Missing metrics / false zero-hit claims | Keep independent cache status, per-request error details and explicit `null` values |
+| Server-wide metric contamination | Dedicated inference environment, workload isolation and attribution validation |
+| Backend/configuration drift | Pin and record model revisions, software, CUDA/kernel settings, sampling and cache options |
+| Resource exhaustion | Preserve bounded parsing; consider rate limits, retries and broader resource policies |
+| CI or supply-chain compromise | Dependency auditing, least-privilege automation, evaluate action pinning and SBOM |
+| Overgeneralizing deterministic results | Add cross-platform, high-concurrency and stochastic verification research |
 
-## 6. What the real-GPU experiment demonstrates
+## 6. Hardware-backed evidence and its limits
 
-A Tesla T4 experiment with vLLM 0.33.0 and Qwen3-0.6B recorded real prefix-cache reuse (368/377 cached prompt tokens on two warm requests) and identical generated token IDs across six requests. The scripts and observations are published with CPU-only verification tests.
+**Earlier T4 Python API study:** a cache-ON/OFF comparison observed 368/377 cached prompt tokens for warm cache-enabled calls and matching generated token-ID sequences in its recorded trials. [Study](../experiments/t4_qwen3_0_6b/README.md).
 
-The result supports repeatability claims for that specific configuration, but is not an H100-specific reproduction of [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896). The upstream issue concerns vLLM behavior; InferenceGuard addresses its regression detection and evidence-collection aspects.
+**Newer managed-server T4 integration study:** vLLM 0.33.0 and Qwen/Qwen3-0.6B yielded 3/3 matching 24-token responses and recorded cache-query/hit totals of 1,689 / 1,120, a 66.31% token-level cache-hit ratio. Archived results passed internal consistency validation. [Study](../experiments/vllm_cache_observability_t4/T4_EXPERIMENT_REPORT.md).
+
+These are **different experiments**. The newer report explicitly notes the absence of retained raw before-and-after Prometheus snapshots and records attention-backend and shutdown diagnostics. Neither study reproduces or resolves [vLLM issue #40896](https://github.com/vllm-project/vllm/issues/40896), originally reported on a different GPU environment. None establishes universal determinism, measured speedup, cost reduction or security certification.
+
+The P5.2 local demonstrations are deliberately simulated; they are not additional hardware-backed evidence.
 
 ## 7. Reporting discipline
 
-Describe what each test or experiment measured, and keep results distinct from universal guarantees. A successful comparison establishes that the selected observed invariants held; it is not a proof of semantic correctness, security certification, or absence of every regression.
+A `PASS` states that the **selected observable comparison invariants** held. It does not certify model semantics or reliability across untested configurations. A separate cache status must be checked whenever cache observability is required by an operational gate.
+
+At the completed P5.2 checkpoint, the repository recorded **170 passing automated tests** and clean Ruff checks; ongoing CI and future milestone measurements must be assessed independently.
