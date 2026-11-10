@@ -25,6 +25,7 @@ class DemoHandler(BaseHTTPRequestHandler):
         return SIMULATED_TOKEN_IDS
 
     def do_POST(self):
+        """Serve simulated completion responses."""
         if self.path != "/v1/completions":
             self.send_error(404)
             return
@@ -69,6 +70,7 @@ def run_demo(
     output: Path,
     *,
     handler_class: type[BaseHTTPRequestHandler] = DemoHandler,
+    observe_prefix_cache: bool = False,
 ) -> int:
     """Run the existing InferenceGuard CLI against a local demo server."""
 
@@ -84,25 +86,28 @@ def run_demo(
 
         endpoint = f"http://127.0.0.1:{server.server_port}/v1/completions"
 
-        return inferenceguard_main(
-            [
-                "repeat",
-                "--endpoint",
-                endpoint,
-                "--model",
-                "customer-demo-model",
-                "--prompt",
-                "Demonstrate deterministic inference.",
-                "--repeats",
-                "3",
-                "--comparison-mode",
-                "tokens",
-                "--max-tokens",
-                "24",
-                "--output",
-                str(output),
-            ]
-        )
+        cli_args = [
+            "repeat",
+            "--endpoint",
+            endpoint,
+            "--model",
+            "customer-demo-model",
+            "--prompt",
+            "Demonstrate deterministic inference.",
+            "--repeats",
+            "3",
+            "--comparison-mode",
+            "tokens",
+            "--max-tokens",
+            "24",
+            "--output",
+            str(output),
+        ]
+
+        if observe_prefix_cache:
+            cli_args.append("--observe-prefix-cache")
+
+        return inferenceguard_main(cli_args)
 
     finally:
         server.shutdown()
